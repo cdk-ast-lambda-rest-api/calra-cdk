@@ -125,7 +125,7 @@ class Resource:
             for connection in resource.get_connections():
                 self.connect(connection)
             return True
-        # elif len(resource_path) == len(self.get_path()):
+
         if len(resource_path) < len(self.get_path()) and self.get_path() in resource_path: #Given resource comes before current, so we have to switch them
             aux = self.clone(self)
             self.methods = resource.get_methods()
@@ -165,6 +165,7 @@ def get_file_nodes(parsed_tree, id, directory):
     node_list = []
     for node in parsed_tree.body:
         if isinstance(node, ast.FunctionDef):
+            is_lambda_http = False
             method_decorators = {}
             func_name = node.name
             paths = {} #A handler could have multiple paths with multiple HTTP methods
@@ -176,6 +177,7 @@ def get_file_nodes(parsed_tree, id, directory):
                     # An HTTP request will always have an endpoint
                     if decorator_name in {'GET', 'PUT', 'DELETE', 'POST'}:
                         http_decorator = True
+                        is_lambda_http = True
                         #First argument should be path
                         path = decorator.args[0].s
                         if http_decorator:
@@ -196,24 +198,26 @@ def get_file_nodes(parsed_tree, id, directory):
                     decorator_name = ast.unparse(decorator).strip()
                     # Aggregate metadata from all decorators
                     method_decorators.setdefault(decorator_name, [])
-            #ast.FunctionDef ends
-            for key,value in paths.items():
-                #If id (file) is at the root of directory, no change needed. Else we need to only get the file
-                filepath = id[id.rindex(os.sep)+1:] if id.count(os.sep) > 0 else id 
-                #Concatenate directory to id (file) for lambda entry point /  separate "index" file from path
-                full_path = os.path.join(directory,id)
-                
-                method = Method(path_to_file=full_path[:full_path.rindex(os.sep)], file= filepath, handler=func_name, method=value, decorators=method_decorators)
-                node_exists = False
-                if len(node_list) > 0:
-                    for node in node_list:
-                        if node.get_path() == key:
-                            node.add_method(method)
-                            node_exists = True
-                if not node_exists:
-                    new_resource = Resource(path=key)
-                    new_resource.add_method(method)
-                    node_list.append(new_resource)
+
+            #ast.FunctionDef ends. If the Function had an HTTP Decorator it means it's a lambda function
+            if is_lambda_http: 
+                for key,value in paths.items():
+                    #If id (file) is at the root of directory, no change needed. Else we need to only get the file
+                    filepath = id[id.rindex(os.sep)+1:] if id.count(os.sep) > 0 else id 
+                    #Concatenate directory to id (file) for lambda entry point /  separate "index" file from path
+                    full_path = os.path.join(directory,id)
+                    
+                    method = Method(path_to_file=full_path[:full_path.rindex(os.sep)], file= filepath, handler=func_name, method=value, decorators=method_decorators)
+                    node_exists = False
+                    if len(node_list) > 0:
+                        for node in node_list:
+                            if node.get_path() == key:
+                                node.add_method(method)
+                                node_exists = True
+                    if not node_exists:
+                        new_resource = Resource(path=key)
+                        new_resource.add_method(method)
+                        node_list.append(new_resource)
 
     return node_list
 

@@ -7,6 +7,7 @@ from aws_cdk import (
     aws_lambda_python_alpha as _lambda_python)
 import os
 from calra_cdk import ast_helper
+
 class class_name():
 
     def __init__(self):
@@ -27,11 +28,11 @@ class class_name():
         self.custom_security_groups = {}
         self.custom_vpcs = {}
 
-        self.custom_runtimes.update({'python3.8',lambda_.Runtime.PYTHON_3_8})
-        self.custom_runtimes.update({'python3.9',lambda_.Runtime.PYTHON_3_9})
-        self.custom_runtimes.update({'python3.10',lambda_.Runtime.PYTHON_3_10})
-        self.custom_runtimes.update({'python3.11',lambda_.Runtime.PYTHON_3_11})
-        self.custom_runtimes.update({'python3.12',lambda_.Runtime.PYTHON_3_12})
+        self.custom_runtimes.update({'python3.8':lambda_.Runtime.PYTHON_3_8})
+        self.custom_runtimes.update({'python3.9':lambda_.Runtime.PYTHON_3_9})
+        self.custom_runtimes.update({'python3.10':lambda_.Runtime.PYTHON_3_10})
+        self.custom_runtimes.update({'python3.11':lambda_.Runtime.PYTHON_3_11})
+        self.custom_runtimes.update({'python3.12':lambda_.Runtime.PYTHON_3_12})
 
     #Setters
     def set_default_runtime(self, runtime: lambda_.Runtime):
@@ -40,7 +41,7 @@ class class_name():
     def set_default_timeout(self, timeout: Duration):
         self.default_timeout = timeout
 
-    def set_default_memory_size(self, memory_size: int): #Deberia ser clase Number
+    def set_default_memory_size(self, memory_size: int):
         self.default_memory_size = memory_size 
 
     def set_default_vpc(self, vpc, vpc_subnets: list):
@@ -63,7 +64,7 @@ class class_name():
     def add_custom_vpc(self, name: str, vpc: ec2.Vpc, vpc_subnets: list):
         self.custom_vpcs.update({name:(vpc, vpc_subnets)})
     
-    def add_custom_environment(self, name: str, value: str | int): #Floats tambien?
+    def add_custom_environment(self, name: str, value: str | int | float):
         self.custom_environments.update({name:value})
 
     def add_custom_runtime(self, name: str, value: lambda_.Runtime):
@@ -89,7 +90,7 @@ class class_name():
     def get_default_memory_size(self) -> int | None:
         return self.default_memory_size
 
-    def get_default_vpc(self) -> tuple:
+    def get_default_vpc(self) -> tuple | None:
         return self.default_vpc
 
     def get_default_role(self) -> iam.Role | None:
@@ -98,7 +99,7 @@ class class_name():
     def get_common_layers(self) -> list | None:
         return self.common_layers
 
-    def get_common_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion | None:
+    def get_common_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion:
         return self.common_layers[value]
     
     def get_common_security_groups(self):
@@ -113,7 +114,7 @@ class class_name():
     def get_common_environment(self, value: str):
         return self.common_environments[value]
     
-    def get_custom_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion | None:
+    def get_custom_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion:
         if self.custom_layers.get(value):
             return self.custom_layer[value]
         else: raise KeyError(name=f'Value {value} not previously declared as custom layer')
@@ -121,22 +122,22 @@ class class_name():
     def get_custom_roles(self):
         return self.custom_roles
     
-    def get_custom_role(self, value: str) -> iam.Role | None:
+    def get_custom_role(self, value: str) -> iam.Role:
         if self.custom_roles.get(value):
             return self.custom_roles[value]
         else: raise KeyError(name=f'Value {value} not previously declared as custom role')
     
-    def get_custom_security_group(self, value: str) -> ec2.SecurityGroup | None:
+    def get_custom_security_group(self, value: str) -> ec2.SecurityGroup:
         if self.custom_security_groups.get(value):
             return self.custom_security_groups[value]
         else: raise KeyError(name=f'Value {value} not previously declared as custom security group')
     
-    def get_custom_environment(self, value: str) -> str | None:
+    def get_custom_environment(self, value: str) -> str:
         if self.custom_environments.get(value):
             return self.custom_environments[value]
         else: raise KeyError(name=f'Value {value} not previously declared as custom environment')
     
-    def get_custom_runtime(self, value: str) -> lambda_.Runtime | None: 
+    def get_custom_runtime(self, value: str) -> lambda_.Runtime: 
         if self.custom_runtimes.get(value):
             return self.custom_runtimes[value]
         else: raise KeyError(name=f'Value {value} not previously declared as custom runtime')
@@ -145,8 +146,10 @@ class class_name():
         #TODO
         return self.custom_vpcs[value]
 
-    def create_lbd_rest_stack(self, construct, api_resource: apigateway.IResource, lambda_path:str):
+    def create_lbd_rest_stack(self, construct, api_resource: apigateway.IResource, lambda_path:str, print_tree: bool = False):
         graph = ast_helper.get_lambda_graph(lambda_path)
+        if print_tree:
+            ast_helper.dump_tree(graph)
         self.build(construct, graph, api_resource)
 
     def get_options(self, decorators:dict) -> dict:
@@ -162,7 +165,7 @@ class class_name():
         #Optional values that may be or not be overriden
         options.update({'description':None})
         options.update({'name':None})
-        #Add defaults and let the decorators overwrite them (in case of sets) or aggregate them (in case of common)
+        #Add defaults and let the decorators overwrite them (in case of defaults) or aggregate them (in case of common)
         for key, value in decorators.items():
             if key in ['memory_size','description','name']:
                 options.update({key: value})
@@ -196,8 +199,7 @@ class class_name():
         entry_path = method.get_path_to_file()
         options = self.get_options(method.get_decorators())
         lambda_function = _lambda_python.PythonFunction(
-            construct,
-            logical_id,
+            construct, logical_id,
             function_name = options['name'] if options['name'] else logical_id,
             description = options['description'],
             entry = entry_path,
@@ -210,8 +212,8 @@ class class_name():
             security_groups= options['security_groups'],
             vpc= None, #options['vpc'][1], #VPC
             vpc_subnets= None, #options['vpc'][2], #VPC Subnets, no deberia andar ya que es una lista de subredes y el parametro acepta mapa
-            environment= options['environment'], #Si es un dict pero esta vacio lo toma como None o tirara error?
-            role= options['role'] #Puede dar error con ints? todo debe ser str?
+            environment= options['environment'],
+            role= options['role'] 
         )
         return lambda_function
 
