@@ -27,6 +27,12 @@ class class_name():
         self.custom_security_groups = {}
         self.custom_vpcs = {}
 
+        self.custom_runtimes.update({'python3.8',lambda_.Runtime.PYTHON_3_8})
+        self.custom_runtimes.update({'python3.9',lambda_.Runtime.PYTHON_3_9})
+        self.custom_runtimes.update({'python3.10',lambda_.Runtime.PYTHON_3_10})
+        self.custom_runtimes.update({'python3.11',lambda_.Runtime.PYTHON_3_11})
+        self.custom_runtimes.update({'python3.12',lambda_.Runtime.PYTHON_3_12})
+
     #Setters
     def set_default_runtime(self, runtime: lambda_.Runtime):
         self.default_runtime = runtime
@@ -108,27 +114,35 @@ class class_name():
         return self.common_environments[value]
     
     def get_custom_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion | None:
-        return self.custom_layers[value]
+        if self.custom_layers.get(value):
+            return self.custom_layer[value]
+        else: raise NameError(name=f'Value {value} not previously declared as custom layer')
 
     def get_custom_roles(self):
         return self.custom_roles
-
-    def get_custom_role(self, value: str) -> iam.Role | None: 
-        return self.custom_roles[value]
     
-    def get_custom_role(self, value: str) -> iam.Role | None: 
-        return self.custom_roles[value]
+    def get_custom_role(self, value: str) -> iam.Role | None:
+        if self.custom_roles.get(value):
+            return self.custom_roles[value]
+        else: raise NameError(name=f'Value {value} not previously declared as custom role')
     
     def get_custom_security_group(self, value: str) -> ec2.SecurityGroup | None:
-        return self.custom_security_groups[value] 
+        if self.custom_security_groups.get(value):
+            return self.custom_security_groups[value]
+        else: raise NameError(name=f'Value {value} not previously declared as custom security group')
     
     def get_custom_environment(self, value: str) -> str | None:
-        return self.custom_environments[value] 
+        if self.custom_environments.get(value):
+            return self.custom_environments[value]
+        else: raise NameError(name=f'Value {value} not previously declared as custom environment')
     
     def get_custom_runtime(self, value: str) -> lambda_.Runtime | None: 
-        return self.custom_runtimes[value]
+        if self.custom_runtimes.get(value):
+            return self.custom_runtimes[value]
+        else: raise NameError(name=f'Value {value} not previously declared as custom runtime')
     
     def get_custom_vpc(self, value: str) -> tuple:
+        #TODO
         return self.custom_vpcs[value]
 
     def create_lbd_rest_stack(self, construct, api_resource: apigateway.IResource, lambda_path:str):
@@ -195,7 +209,7 @@ class class_name():
             memory_size=options['memory_size'],
             security_groups= options['security_groups'],
             vpc= None, #options['vpc'][1], #VPC
-            vpc_subnets= None, #options['vpc'][2], #VPC Subnets, no deberia andar ya que es una lista de subredes y no mapa
+            vpc_subnets= None, #options['vpc'][2], #VPC Subnets, no deberia andar ya que es una lista de subredes y el parametro acepta mapa
             environment= options['environment'], #Si es un dict pero esta vacio lo toma como None o tirara error?
             role= options['role'] #Puede dar error con ints? todo debe ser str?
         )
