@@ -183,9 +183,14 @@ def get_file_nodes(parsed_tree, id, directory):
                     else:
                         if len(decorator.args) > 1:
                             args = [arg.s for arg in decorator.args]
-                            method_decorators.setdefault(decorator_name, []).extend(args) 
+                            method_decorators.setdefault(decorator_name, []).extend(args)
                         else:
-                            method_decorators.setdefault(decorator_name, decorator.args[0].s) 
+                            if isinstance(decorator.args[0], ast.List):
+                                value = [elt.s for elt in decorator.args[0].elts]
+                                print(value)
+                            else:
+                                value = decorator.args[0].s
+                            method_decorators.setdefault(decorator_name, value) 
                 else:
                     # Handle decorators without arguments
                     decorator_name = ast.unparse(decorator).strip()

@@ -7,7 +7,6 @@ from aws_cdk import (
     aws_lambda_python_alpha as _lambda_python)
 import os
 from calra_cdk import ast_helper
-
 class class_name():
 
     def __init__(self):
@@ -165,7 +164,6 @@ class class_name():
             elif key == 'security_group':
                 options[key].append(self.get_custom_security_group(value))
             elif key == 'environment':
-                #Puede ser un unico valor or una lista de valores
                 if type(value) == list:
                     for v in value:
                         options[key][v] = self.get_custom_environment(v)
