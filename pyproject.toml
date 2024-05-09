@@ -1,0 +1,97 @@
+# Guide (user-friendly):
+# https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+
+# Specification (technical, formal):
+# https://packaging.python.org/en/latest/specifications/pyproject-toml/
+
+
+# Choosing a build backend:
+# https://packaging.python.org/en/latest/tutorials/packaging-projects/#choosing-a-build-backend
+[build-system]
+# A list of packages that are needed to build your package:
+requires = ["setuptools"]  # REQUIRED if [build-system] table is used
+# The name of the Python object that frontends will use to perform the build:
+build-backend = "setuptools.build_meta"  # If not defined, then legacy behavior can happen.
+
+
+[project]
+# https://packaging.python.org/specifications/core-metadata/#name
+name = "calra-cdk"
+# https://packaging.python.org/guides/single-sourcing-package-version/
+version = "0.1.0"
+
+# https://packaging.python.org/specifications/core-metadata/#summary
+description = "CDK Ast Lambda Rest Api - CDK Package"
+
+# https://packaging.python.org/specifications/core-metadata/#description-optional
+readme = "README.md"
+
+# https://packaging.python.org/guides/distributing-packages-using-setuptools/#python-requires
+requires-python = ">=3.9"
+
+
+# https://packaging.python.org/en/latest/specifications/core-metadata/#license
+license = {file = "LICENSE"}
+
+keywords = ["cdk", "lambda", "aws", "api gateway", "ast"]
+
+authors = [
+  {name = "Mateo Marcos", email = "calra.github+mateo@gmail.com" },
+  {name = "Emanuel Arguinarena", email = "calra.github+emanuel@gmail.com" },
+  {name = "Lucas Picchi", email = "calra.github+lucas@gmail.com" }
+]
+
+#maintainers = [
+#  {name = "A. Great Maintainer", email = "maintainer@example.com" }
+#]
+
+
+# For a list of valid classifiers, see https://pypi.org/classifiers/
+classifiers = [
+  'Development Status :: 2 - Pre-Alpha',
+  'Intended Audience :: Developers',
+  'Framework :: AWS CDK :: 2',
+  'Topic :: Software Development :: Libraries :: Python Modules',
+  'Topic :: Software Development :: Build Tools',
+  'License :: OSI Approved :: MIT License',
+  'Programming Language :: Python :: 3.9',
+  'Programming Language :: Python :: 3.10',
+  'Programming Language :: Python :: 3.11',
+  'Programming Language :: Python :: 3.12'
+]
+
+# For an analysis of this field vs pip's requirements files see:
+# https://packaging.python.org/discussions/install-requires-vs-requirements/
+dependencies = [
+  "aws-cdk.aws-lambda-python-alpha"
+]
+
+
+# https://packaging.python.org/en/latest/specifications/dependency-specifiers/#extras
+#[project.optional-dependencies]
+#dev = ["check-manifest"]
+#test = ["coverage"]
+
+# List URLs that are relevant to your project
+#
+# This field corresponds to the "Project-URL" and "Home-Page" metadata fields:
+# https://packaging.python.org/specifications/core-metadata/#project-url-multiple-use
+# https://packaging.python.org/specifications/core-metadata/#home-page-optional
+#
+# Examples listed include a pattern for specifying where the package tracks
+# issues, where the source is hosted, where to say thanks to the package
+# maintainers, and where to support the project financially. The key is
+# what's used to render the link text on PyPI.
+[project.urls]
+"Bug Reports" = "https://github.com/cdk-ast-lambda-rest-api/calra-cdk/issues"
+"Source" = "https://github.com/cdk-ast-lambda-rest-api/calra-cdk"
+
+# The following would provide a command line executable called `sample`
+# which executes the function `main` from this package when invoked.
+#[project.scripts]
+#sample = "sample:main"
+
+
+# This is configuration specific to the `setuptools` build backend.
+# If you are using a different build backend, you will need to change this.
+[tool.setuptools]
