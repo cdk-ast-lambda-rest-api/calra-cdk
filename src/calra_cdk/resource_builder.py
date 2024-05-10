@@ -8,9 +8,13 @@ from aws_cdk import (
 import os
 from calra_cdk import ast_helper
 
-class class_name():
+class ResourceBuilder():
 
     def __init__(self):
+        '''Creates base instance of a Resource Builder. By default, there are no predetermined custom, common nor default settings with the exception of the following custom runtimes: python3.8, python3.9, python.10, python.11, python.12.
+        
+        To configure new options, use the set_default_XXXX, add_common_XXXX and add_custom_XXXX functions to add VPCs, Layers, Roles, Runtimes, Security Groups and Environment Variables. 
+        '''
         self.default_runtime = None
         self.default_timeout = None
         self.default_memory_size = None
@@ -36,47 +40,59 @@ class class_name():
 
     #Setters
     def set_default_runtime(self, runtime: lambda_.Runtime):
+        '''Set the default runtime every Lambda Function in the scope of the builder will have.'''
         self.default_runtime = runtime
     
     def set_default_timeout(self, timeout: Duration):
+        '''Set the default timeout every Lambda Function in the scope of the builder will have. If not specified, timeout will be CDK's default.'''
         self.default_timeout = timeout
 
     def set_default_memory_size(self, memory_size: int):
+        '''Set the default memory size every Lambda Function in the scope of the builder will have. If not specified, memory size will be CDK's default.'''
         self.default_memory_size = memory_size 
 
     def set_default_vpc(self, vpc, vpc_subnets: list):
+        '''Set the default VPC and Subnets every Lambda Function in the scope of the builder will have. If not specified, none will be assigned to Lambda.'''
         self.default_vpc = (vpc, vpc_subnets)
 
     def set_default_role(self, role: iam.Role):
+        '''Set the default Role and permissions every Lambda Function in the scope of the builder will have. If not specified, CDK will create it's own for your Lambda.'''
         self.default_role = role
 
     #Adders
-    #Esto funciona arriba de lambda o lambda alpha? El 1ro es LayerVersion el 2do PythonLayerVersion
     def add_common_layer(self, layer = lambda_.LayerVersion | _lambda_python.PythonLayerVersion):
+        '''Add a common layer for all your Lambda Functions.'''
         self.common_layers.append(layer) if layer not in self.common_layers else None
 
     def add_common_security_group(self, security_group):
+        '''Add a common security group for all your Lambda Functions.'''
         self.common_security_groups.append(security_group) if security_group not in self.common_security_groups else None
 
     def add_common_environment(self, key:str, value):
+        '''Add a common environment variable and value for all your Lambda Functions.'''
         self.common_environments.update({key:value})
 
     def add_custom_vpc(self, name: str, vpc: ec2.Vpc, vpc_subnets: list):
         self.custom_vpcs.update({name:(vpc, vpc_subnets)})
     
     def add_custom_environment(self, name: str, value: str | int | float):
+        '''Add a custom environment variable and value for every lambda function with the decorator @environment(name).'''
         self.custom_environments.update({name:value})
 
     def add_custom_runtime(self, name: str, value: lambda_.Runtime):
+        '''Add a custom Rruntime for every lambda function with the decorator @runtime(name).'''
         self.custom_runtimes.update({name:value})
 
     def add_custom_role(self, name: str, value: iam.Role):
+        '''Add a custom Role for every lambda function with the decorator @role(name).'''
         self.custom_roles.update({name:value})
 
     def add_custom_layer(self, name: str, value: lambda_.LayerVersion | _lambda_python.PythonLayerVersion):
+        '''Add a custom Layer for every lambda function with the decorator @layer(name).'''
         self.custom_layers.update({name:value})
 
     def add_custom_security_group(self, name: str, value: ec2.SecurityGroup):
+        '''Add a custom security group for every lambda function with the decorator @security_group(name).'''
         self.custom_layers.update({name:value})
 
 
@@ -146,7 +162,13 @@ class class_name():
         #TODO
         return self.custom_vpcs[value]
 
-    def create_lbd_rest_stack(self, construct, api_resource: apigateway.IResource, lambda_path:str, print_tree: bool = False):
+    def build_lbd_rest_stack(self, construct, api_resource: apigateway.IResource, lambda_path:str, print_tree: bool = False):
+        '''Dynamically creates Lambda Functions and Rest Api resources based on the options assigned to the builder.
+        @param construct: Stack which new resources and functions will be assigned to.
+        @param api_resource: REST API root resource from which the new resources/endpoints will be added.
+        @param lambda_path: Relative path (from cdk project workspace root dir) to the lambda functions defined.
+        @param print_tree: Optional value to output to terminal the API and functions built in a tree syntaxis.. Defaults to False.'''
+
         graph = ast_helper.get_lambda_graph(lambda_path)
         if print_tree:
             ast_helper.dump_tree(graph)
@@ -222,14 +244,12 @@ class class_name():
         path = graph.get_path()
         level = path.count('/')
         if level <= 1 and len(path) <= 1: #root '/'
-            print("Root Resource for " + path + " doesn't have to be created")
             new_resource = api_resource
             for method in graph.get_methods():
                 lbda = self.build_lambda_function(construct, method)
                 new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
         else:
-            resource_name = path[path.rindex('/')+1:]  #path[path.rindex('/')+1 para que sea sin /
-            print("Creating resource for " + path + ' as ' + resource_name)
+            resource_name = path[path.rindex('/')+1:]
             new_resource = api_resource.add_resource(resource_name)
             for method in graph.get_methods():
                 lbda = self.build_lambda_function(construct, method)
