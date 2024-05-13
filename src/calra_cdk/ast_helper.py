@@ -21,7 +21,7 @@ class Method:
         return self.method
     
     def get_logical_id(self):
-        return self.get_file().replace('.','dot').replace('/','-') + '-' + self.get_handler() #No puedo poner el os.sep aca porque como compila en windows no toma el '/'
+        return self.get_file().replace('.','dot').replace('/','-') + '-' + self.get_handler()
     
     def get_file(self):
         return self.file
@@ -37,10 +37,6 @@ class Method:
     
     def get_decorators(self):
         return self.decorators
-    
-    # def add_decorators(self, dict):
-    #     print(dict)
-    #     self.decorators.update(dict)
     
     def __eq__(self, other):
         try:
@@ -189,7 +185,6 @@ def get_file_nodes(parsed_tree, id, directory):
                         else:
                             if isinstance(decorator.args[0], ast.List):
                                 value = [elt.s for elt in decorator.args[0].elts]
-                                print(value)
                             else:
                                 value = decorator.args[0].s
                             method_decorators.setdefault(decorator_name, value) 

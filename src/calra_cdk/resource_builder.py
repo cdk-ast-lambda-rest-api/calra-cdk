@@ -7,36 +7,76 @@ from aws_cdk import (
     aws_lambda_python_alpha as _lambda_python)
 import os
 from calra_cdk import ast_helper
+from typing import Optional, List, Dict
 
 class ResourceBuilder():
+    '''
+    Entrypoint to calra_cdk's functionality. Create a Builder object and set the custom requirements for your Lambda Functions.
 
-    def __init__(self):
-        '''Creates base instance of a Resource Builder. By default, there are no predetermined custom, common nor default settings with the exception of the following custom runtimes: python3.8, python3.9, python.10, python.11, python.12.
-        
-        To configure new options, use the set_default_XXXX, add_common_XXXX and add_custom_XXXX functions to add VPCs, Layers, Roles, Runtimes, Security Groups and Environment Variables. 
+    Refer to the constructor method to get started instantiating a builder. 
+
+    For more configuration options, use the set_default_XXXX, add_common_XXXX and add_custom_XXXX methods to add VPCs, Layers, Roles, Runtimes, Security Groups and Environment Variables. 
+    '''
+
+    def __init__(self,
+                default_runtime: Optional[lambda_.Runtime] = None,
+                default_timeout: Optional[Duration] = None,
+                default_memory_size: Optional[int] = None,
+                default_vpc = None,
+                default_role: Optional[iam.Role] = None,
+                common_layers: List = None,
+                common_security_groups: List[ec2.SecurityGroup] = None,
+                common_environments: Dict[str, str] = {},
+                custom_runtimes: Dict[str, lambda_.Runtime] = {},
+                custom_roles: Dict[str, iam.Role] = {},
+                custom_layers: Dict[str, None] = {}, ####TODO
+                custom_environments: Dict[str, str] = {},
+                custom_security_groups: Dict[str, ec2.SecurityGroup] = {},
+                custom_vpcs = {} ####TODO
+                ) -> 'ResourceBuilder':
+    
         '''
-        self.default_runtime = None
-        self.default_timeout = None
-        self.default_memory_size = None
-        self.default_vpc = None
-        self.default_role = None
+        Creates base instance of a Resource Builder. By default, there are no predetermined custom, common nor default settings with the exception of the following custom runtimes: python3.8, python3.9, python.10, python.11, python.12.
+        You can optionally specify arguments (Keep in mind some of them are constructs of the aws_cdk toolkit) such as:
+        @param default_runtime
+        @param default_timeout
+        @param default_memory_size
+        @param default_vpc
+        @param default_role
+        @param common_layers
+        @param common_security_groups
+        @param common_environments
+        @param custom_runtimes
+        @param custom_roles
+        @param custom_layers
+        @param custom_environments
+        @param custom_security_groups
+        @param custom_vpcs
+        '''
+        # Check and set properties based on provided keyword arguments
+        self.default_runtime = default_runtime
+        self.default_timeout = default_timeout
+        self.default_memory_size = default_memory_size
+        self.default_vpc = default_vpc
+        self.default_role = default_role
         
-        self.common_layers = []
-        self.common_security_groups = []
-        self.common_environments = {}
+        self.common_layers = common_layers
+        self.common_security_groups = common_security_groups
+        self.common_environments = common_environments
         
-        self.custom_runtimes = {}
-        self.custom_roles = {}
-        self.custom_layers = {}
-        self.custom_environments = {}
-        self.custom_security_groups = {}
-        self.custom_vpcs = {}
+        self.custom_runtimes = custom_runtimes
+        self.custom_roles = custom_roles
+        self.custom_layers = custom_layers
+        self.custom_environments = custom_environments
+        self.custom_security_groups = custom_security_groups
+        self.custom_vpcs = custom_vpcs
 
         self.custom_runtimes.update({'python3.8':lambda_.Runtime.PYTHON_3_8})
         self.custom_runtimes.update({'python3.9':lambda_.Runtime.PYTHON_3_9})
         self.custom_runtimes.update({'python3.10':lambda_.Runtime.PYTHON_3_10})
         self.custom_runtimes.update({'python3.11':lambda_.Runtime.PYTHON_3_11})
         self.custom_runtimes.update({'python3.12':lambda_.Runtime.PYTHON_3_12})
+
 
     #Setters
     def set_default_runtime(self, runtime: lambda_.Runtime):
@@ -162,17 +202,19 @@ class ResourceBuilder():
         #TODO
         return self.custom_vpcs[value]
 
-    def build_lbd_rest_stack(self, construct, api_resource: apigateway.IResource, lambda_path:str, print_tree: bool = False):
-        '''Dynamically creates Lambda Functions and Rest Api resources based on the options assigned to the builder.
+    def build(self, construct, api_resource: apigateway.IResource, lambda_path:str, print_tree: bool = False):
+        '''
+        Dynamically create Lambda Functions and Rest Api resources based on the options assigned to the builder.
         @param construct: Stack which new resources and functions will be assigned to.
         @param api_resource: REST API root resource from which the new resources/endpoints will be added.
         @param lambda_path: Relative path (from cdk project workspace root dir) to the lambda functions defined.
-        @param print_tree: Optional value to output to terminal the API and functions built in a tree syntaxis.. Defaults to False.'''
+        @param print_tree: Optional value to output to terminal the API and functions built in a tree syntaxis.. Defaults to False.
+        '''
 
         graph = ast_helper.get_lambda_graph(lambda_path)
         if print_tree:
             ast_helper.dump_tree(graph)
-        self.build(construct, graph, api_resource)
+        self.build_from_graph(construct, graph, api_resource)
 
     def get_options(self, decorators:dict) -> dict:
         options = {}
@@ -232,14 +274,14 @@ class ResourceBuilder():
             layers = options['layers'],
             memory_size=options['memory_size'],
             security_groups= options['security_groups'],
-            vpc= None, #options['vpc'][1], #VPC
-            vpc_subnets= None, #options['vpc'][2], #VPC Subnets, no deberia andar ya que es una lista de subredes y el parametro acepta mapa
+            vpc= None, 
+            vpc_subnets= None, 
             environment= options['environment'],
             role= options['role'] 
         )
         return lambda_function
 
-    def build(self, construct, graph: ast_helper.Resource, api_resource: apigateway.IResource):
+    def build_from_graph(self, construct, graph: ast_helper.Resource, api_resource: apigateway.IResource):
 
         path = graph.get_path()
         level = path.count('/')
@@ -256,4 +298,4 @@ class ResourceBuilder():
                 new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
 
         for node in graph.get_connections():
-            self.build(construct, node, new_resource)
+            self.build_from_graph(construct, node, new_resource)
