@@ -24,8 +24,8 @@ class ResourceBuilder():
                 default_memory_size: Optional[int] = None,
                 default_vpc = None,
                 default_role: Optional[iam.Role] = None,
-                common_layers: List = None,
-                common_security_groups: List[ec2.SecurityGroup] = None,
+                common_layers: List = [],
+                common_security_groups: List[ec2.SecurityGroup] = [],
                 common_environments: Dict[str, str] = {},
                 custom_runtimes: Dict[str, lambda_.Runtime] = {},
                 custom_roles: Dict[str, iam.Role] = {},
@@ -158,7 +158,7 @@ class ResourceBuilder():
     def get_common_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion:
         return self.common_layers[value]
     
-    def get_common_security_groups(self):
+    def get_common_security_groups(self) -> list | None:
         return self.common_security_groups
     
     def get_common_security_group(self, value: str):
@@ -172,7 +172,7 @@ class ResourceBuilder():
     
     def get_custom_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion:
         if self.custom_layers.get(value):
-            return self.custom_layer[value]
+            return self.custom_layers[value]
         else: raise KeyError(name=f'Value {value} not previously declared as custom layer')
 
     def get_custom_roles(self):
@@ -223,9 +223,9 @@ class ResourceBuilder():
         options.update({'timeout': self.get_default_timeout()})
         options.update({'role': self.get_default_role()})
         options.update({'vpc':self.get_default_vpc()})
-        options.update({'environment':self.get_common_environments()})
-        options.update({'layers':self.get_common_layers()})
-        options.update({'security_groups':self.get_common_security_groups()})
+        options.update({'environment':dict(self.get_common_environments())})
+        options.update({'layer': list(self.get_common_layers())})
+        options.update({'security_group':list(self.get_common_security_groups())})
         #Optional values that may be or not be overriden
         options.update({'description':None})
         options.update({'name':None})
@@ -239,11 +239,19 @@ class ResourceBuilder():
                 timeout = Duration.seconds(value)
                 options.update({key: timeout})
             elif key == 'layer':
-                options[key].append(self.get_custom_layer(value))
+                if type(value) == list:
+                    for v in value:
+                        options[key].append(self.get_custom_layer(v))
+                else:
+                    options[key].append(self.get_custom_layer(value))
             elif key == 'role':
                 options[key].append(self.get_custom_role(value))
             elif key == 'security_group':
-                options[key].append(self.get_custom_security_group(value))
+                if type(value) == list:
+                    for v in value:
+                        options[key].append(self.get_custom_environment(v))
+                else:
+                    options[key].append(self.get_custom_security_group(value))
             elif key == 'environment':
                 if type(value) == list:
                     for v in value:
@@ -271,9 +279,9 @@ class ResourceBuilder():
             handler = handler,
             runtime = options['runtime'],
             timeout = options['timeout'],
-            layers = options['layers'],
+            layers = options['layer'],
             memory_size=options['memory_size'],
-            security_groups= options['security_groups'],
+            security_groups= options['security_group'],
             vpc= None, 
             vpc_subnets= None, 
             environment= options['environment'],
