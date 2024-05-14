@@ -245,7 +245,7 @@ class ResourceBuilder():
                 else:
                     options[key].append(self.get_custom_layer(value))
             elif key == 'role':
-                options[key].append(self.get_custom_role(value))
+                options[key] = self.get_custom_role(value)
             elif key == 'security_group':
                 if type(value) == list:
                     for v in value:
