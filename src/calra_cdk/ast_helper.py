@@ -7,7 +7,7 @@ class Method:
     def __init__(self, path_to_file:str, file: str, handler: str, method: str, decorators: dict):
         '''One http method is always associated with a file:handler entrypoint in a one-to-one relationship and each handler has decorators in a one-to-many relationship'''
         if method not in self.ALLOWED_METHODS:
-            raise ValueError(f'Invalid method: {method}. Allowed methods are {', '.join(self.ALLOWED_METHODS)}')
+            raise ValueError(f"Invalid method: {method}. Allowed methods are {', '.join(self.ALLOWED_METHODS)}")
         self.method = method
         self.file = file.replace(os.sep, '/')
         self.path_to_file = path_to_file.replace(os.sep, '/')
@@ -73,7 +73,6 @@ class Resource:
             #methods_str = methods_str + '(' + method.get_method() + ' at ' + method.get_logical_id() + ') '
         return self.get_path() + methods_str 
     
-    #Validar GET PUT UPDATE DELETE? QUE NO SE REPITA?
     def add_method(self, method: Method) -> bool:
         '''Aggregate Method to present Resource's endpoint'''
         if method not in self.methods:

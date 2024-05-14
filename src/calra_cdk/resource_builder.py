@@ -173,7 +173,7 @@ class ResourceBuilder():
     def get_custom_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion:
         if self.custom_layers.get(value):
             return self.custom_layers[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom layer')
+        else: raise KeyError(f"Value {value} not previously declared as custom layer")
 
     def get_custom_roles(self):
         return self.custom_roles
@@ -181,22 +181,22 @@ class ResourceBuilder():
     def get_custom_role(self, value: str) -> iam.Role:
         if self.custom_roles.get(value):
             return self.custom_roles[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom role')
+        else: raise KeyError(f"Value {value} not previously declared as custom role")
     
     def get_custom_security_group(self, value: str) -> ec2.SecurityGroup:
         if self.custom_security_groups.get(value):
             return self.custom_security_groups[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom security group')
+        else: raise KeyError(f"Value {value} not previously declared as custom security group")
     
     def get_custom_environment(self, value: str) -> str:
         if self.custom_environments.get(value):
             return self.custom_environments[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom environment')
+        else: raise KeyError(f"Value {value} not previously declared as custom environment")
     
     def get_custom_runtime(self, value: str) -> lambda_.Runtime: 
         if self.custom_runtimes.get(value):
             return self.custom_runtimes[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom runtime')
+        else: raise KeyError(f"Value {value} not previously declared as custom runtime")
     
     def get_custom_vpc(self, value: str) -> tuple:
         #TODO
