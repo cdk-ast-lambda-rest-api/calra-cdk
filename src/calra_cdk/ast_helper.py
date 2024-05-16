@@ -109,7 +109,15 @@ class Resource:
         clone.connections = self.get_connections()
         clone.methods = self.get_methods()
         return clone
-
+    
+    def switch_nodes(self, resource:'Resource'):
+        aux = self.clone()
+        self.methods = resource.get_methods()
+        self.connections = resource.get_connections()
+        self.path = resource.get_path()
+        resource.connect(aux)
+        return True
+    
     def insert_node(self, resource: 'Resource') -> bool:
         resource_path = resource.get_path()
 
@@ -122,12 +130,13 @@ class Resource:
             return True
         
         if len(resource_path) < len(self.get_path()) and self.get_path().startswith(resource_path): #Given resource comes before current, so we have to switch them
-            aux = self.clone(self)
-            self.methods = resource.get_methods()
-            self.connections = resource.get_connections()
-            self.path = resource.get_path()
-            resource.connect(aux)
-            return True
+            # aux = self.clone()
+            # self.methods = resource.get_methods()
+            # self.connections = resource.get_connections()
+            # self.path = resource.get_path()
+            # resource.connect(aux)
+            # return True
+            return self.switch_nodes(resource)
         
         if len(resource_path) >= len(self.get_path()) and resource_path.startswith(self.get_path()): #Resource goes deeper or bifurcation
             if len(self.get_connections()) < 1:
@@ -136,12 +145,14 @@ class Resource:
             else:
                 matching_node = self
                 matching_prefix_index = self.get_matching_prefix_index(resource_path)
-                for node in self.get_connections():
-                    if node.get_path() in resource_path:
+                for node in self.get_connections(): # Check if it goes deeper or may come in between two nodes
+                    if node.get_path() in resource_path: #deeper candidate
                         node_matching_index = node.get_matching_prefix_index(resource_path)
                         if node_matching_index > matching_prefix_index:
                             matching_prefix_index = node_matching_index
                             matching_node = node
+                    elif resource_path in node.get_path(): #It comes in between, so we have to switch them or guess if it goes deeper
+                        return node.insert_node(resource)
                 if resource_path.startswith(matching_node.get_path()) and matching_node.get_path() not in self.get_path(): #Goes deeper/recursion
                     return matching_node.insert_node(resource)
                 else: #Bifurcation
@@ -171,7 +182,7 @@ def get_file_nodes(parsed_tree, id, directory):
                     # Handle decorators with arguments
                     decorator_name = ast.unparse(decorator.func).strip()
                     # An HTTP request will always have an endpoint
-                    if decorator_name in {'GET', 'PUT', 'DELETE', 'POST'}:
+                    if decorator_name in {'GET', 'PUT', 'DELETE', 'POST', 'ANY'}:
                         http_decorator = True
                         is_lambda_http = True
                         #First argument should be path

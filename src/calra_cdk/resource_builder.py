@@ -173,7 +173,7 @@ class ResourceBuilder():
     def get_custom_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion:
         if self.custom_layers.get(value):
             return self.custom_layers[value]
-        else: raise KeyError(f"Value {value} not previously declared as custom layer")
+        else: raise KeyError(name=f'Value {value} not previously declared as custom layer')
 
     def get_custom_roles(self):
         return self.custom_roles
@@ -181,22 +181,22 @@ class ResourceBuilder():
     def get_custom_role(self, value: str) -> iam.Role:
         if self.custom_roles.get(value):
             return self.custom_roles[value]
-        else: raise KeyError(f"Value {value} not previously declared as custom role")
+        else: raise KeyError(name=f'Value {value} not previously declared as custom role')
     
     def get_custom_security_group(self, value: str) -> ec2.SecurityGroup:
         if self.custom_security_groups.get(value):
             return self.custom_security_groups[value]
-        else: raise KeyError(f"Value {value} not previously declared as custom security group")
+        else: raise KeyError(name=f'Value {value} not previously declared as custom security group')
     
     def get_custom_environment(self, value: str) -> str:
         if self.custom_environments.get(value):
             return self.custom_environments[value]
-        else: raise KeyError(f"Value {value} not previously declared as custom environment")
+        else: raise KeyError(name=f'Value {value} not previously declared as custom environment')
     
     def get_custom_runtime(self, value: str) -> lambda_.Runtime: 
         if self.custom_runtimes.get(value):
             return self.custom_runtimes[value]
-        else: raise KeyError(f"Value {value} not previously declared as custom runtime")
+        else: raise KeyError(name=f'Value {value} not previously declared as custom runtime')
     
     def get_custom_vpc(self, value: str) -> tuple:
         #TODO
@@ -245,7 +245,7 @@ class ResourceBuilder():
                 else:
                     options[key].append(self.get_custom_layer(value))
             elif key == 'role':
-                options[key] = self.get_custom_role(value)
+                options[key].append(self.get_custom_role(value))
             elif key == 'security_group':
                 if type(value) == list:
                     for v in value:
@@ -284,7 +284,6 @@ class ResourceBuilder():
             security_groups= options['security_group'],
             vpc= None, 
             vpc_subnets= None, 
-            allow_public_subnet=False, #If there are public vpc_subnets have to set to True to give internet access
             environment= options['environment'],
             role= options['role'] 
         )
@@ -300,7 +299,12 @@ class ResourceBuilder():
                 lbda = self.build_lambda_function(construct, method)
                 new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
         else:
-            resource_name = path[path.rindex('/')+1:]
+            #We can get a skip from /something to /something/one/two/method, so resources with no methods "one" and "two" should be created
+            new_api_resources = path[len(api_resource.path)+1:].split('/')
+            if len(new_api_resources) > 1: #Resources with no methods associated need to be created. No possible conflict because graph is sorted.
+                for res in new_api_resources[:-1]: # Exclude last resource that will be created w/lambda
+                    api_resource = api_resource.add_resource(res)
+            resource_name = path[path.rindex('/')+1:] #Now we can create the resource associated with the node even if 
             new_resource = api_resource.add_resource(resource_name)
             for method in graph.get_methods():
                 lbda = self.build_lambda_function(construct, method)
