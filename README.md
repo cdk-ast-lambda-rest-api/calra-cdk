@@ -53,7 +53,7 @@ Lastly you can setup custom environments, layers, security groups, vpcs a Lambda
 
 Assuming you have already instantiated a Builder, configured it and ready to deploy your stack, then simply define the directory of your Lambda Functions and build!
 
-Note: For a Lambda Function to be recognised and built, it has to have a decorator specifying the HTTP method it responds to. Again, the [calra-example](https://https://github.com/cdk-ast-lambda-rest-api/calra-example) repository will provide a firm example of a builder setting and lambda proper annotation with decorators using the [calra-lambda](https://pypi.org/project/calra-lambda/) module.
+Note: For a Lambda Function to be recognised and built, it has to have a decorator specifying the HTTP method it responds to. Again, the [calra-example](https://https://github.com/cdk-ast-lambda-rest-api/calra-example) repository will provide a firm example of a builder setting and proper lambda annotation using decorators defined in the [calra-lambda](https://pypi.org/project/calra-lambda/) package.
 
 ```python
 [...] # Imports

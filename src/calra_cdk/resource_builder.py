@@ -284,6 +284,7 @@ class ResourceBuilder():
             security_groups= options['security_group'],
             vpc= None, 
             vpc_subnets= None, 
+            allow_public_subnet=False, #If there are public vpc_subnets have to set to True to give internet access
             environment= options['environment'],
             role= options['role'] 
         )

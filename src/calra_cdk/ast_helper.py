@@ -120,15 +120,16 @@ class Resource:
             for connection in resource.get_connections():
                 self.connect(connection)
             return True
-
-        if len(resource_path) < len(self.get_path()) and self.get_path() in resource_path: #Given resource comes before current, so we have to switch them
+        
+        if len(resource_path) < len(self.get_path()) and self.get_path().startswith(resource_path): #Given resource comes before current, so we have to switch them
             aux = self.clone(self)
             self.methods = resource.get_methods()
             self.connections = resource.get_connections()
             self.path = resource.get_path()
             resource.connect(aux)
             return True
-        elif len(resource_path) >= len(self.get_path()) and resource_path.startswith(self.get_path()): #Resource goes deeper or bifurcation
+        
+        if len(resource_path) >= len(self.get_path()) and resource_path.startswith(self.get_path()): #Resource goes deeper or bifurcation
             if len(self.get_connections()) < 1:
                 self.connect(resource)
                 return True
@@ -141,12 +142,12 @@ class Resource:
                         if node_matching_index > matching_prefix_index:
                             matching_prefix_index = node_matching_index
                             matching_node = node
-                if resource_path.startswith(matching_node.get_path()) and matching_node.get_path() not in self.get_path(): #Goes deeper
+                if resource_path.startswith(matching_node.get_path()) and matching_node.get_path() not in self.get_path(): #Goes deeper/recursion
                     return matching_node.insert_node(resource)
                 else: #Bifurcation
                     self.connect(resource)
                     return True
-        else: #We should never get to this case because the root path would be '/' so we always have a startswith match.
+        else: #We should never get to this case because the root path would be '/' so we always have a startswith match in 3rd case for bifurcation
             self.connect(resource)
             return True
 
