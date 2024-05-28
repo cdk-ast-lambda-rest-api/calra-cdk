@@ -112,28 +112,28 @@ class ResourceBuilder():
         '''Add a common environment variable and value for all your Lambda Functions.'''
         self.common_environments.update({key:value})
 
-    def add_custom_vpc(self, name: str, vpc: ec2.Vpc, vpc_subnets: list):
-        self.custom_vpcs.update({name:(vpc, vpc_subnets)})
+    def add_custom_vpc(self, key: str, vpc: ec2.Vpc, vpc_subnets: list):
+        self.custom_vpcs.update({key:(vpc, vpc_subnets)})
     
-    def add_custom_environment(self, name: str, value: str | int | float):
-        '''Add a custom environment variable and value for every lambda function with the decorator @environment(name).'''
-        self.custom_environments.update({name:value})
+    def add_custom_environment(self, key: str, value: str | int | float):
+        '''Add a custom environment variable and value for every lambda function with the decorator @environment(key).'''
+        self.custom_environments.update({key:value})
 
-    def add_custom_runtime(self, name: str, value: lambda_.Runtime):
-        '''Add a custom Rruntime for every lambda function with the decorator @runtime(name).'''
-        self.custom_runtimes.update({name:value})
+    def add_custom_runtime(self, key: str, value: lambda_.Runtime):
+        '''Add a custom Rruntime for every lambda function with the decorator @runtime(key).'''
+        self.custom_runtimes.update({key:value})
 
-    def add_custom_role(self, name: str, value: iam.Role):
-        '''Add a custom Role for every lambda function with the decorator @role(name).'''
-        self.custom_roles.update({name:value})
+    def add_custom_role(self, key: str, value: iam.Role):
+        '''Add a custom Role for every lambda function with the decorator @role(key).'''
+        self.custom_roles.update({key:value})
 
-    def add_custom_layer(self, name: str, value: lambda_.LayerVersion | _lambda_python.PythonLayerVersion):
-        '''Add a custom Layer for every lambda function with the decorator @layer(name).'''
-        self.custom_layers.update({name:value})
+    def add_custom_layer(self, key: str, value: lambda_.LayerVersion | _lambda_python.PythonLayerVersion):
+        '''Add a custom Layer for every lambda function with the decorator @layer(key).'''
+        self.custom_layers.update({key:value})
 
-    def add_custom_security_group(self, name: str, value: ec2.SecurityGroup):
-        '''Add a custom security group for every lambda function with the decorator @security_group(name).'''
-        self.custom_layers.update({name:value})
+    def add_custom_security_group(self, key: str, value: ec2.SecurityGroup):
+        '''Add a custom security group for every lambda function with the decorator @security_group(key).'''
+        self.custom_layers.update({key:value})
 
 
     #Getters
@@ -284,6 +284,7 @@ class ResourceBuilder():
             security_groups= options['security_group'],
             vpc= None, 
             vpc_subnets= None, 
+            allow_public_subnet=False,
             environment= options['environment'],
             role= options['role'] 
         )

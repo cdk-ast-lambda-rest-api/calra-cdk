@@ -182,7 +182,7 @@ def get_file_nodes(parsed_tree, id, directory):
                     # Handle decorators with arguments
                     decorator_name = ast.unparse(decorator.func).strip()
                     # An HTTP request will always have an endpoint
-                    if decorator_name in {'GET', 'PUT', 'DELETE', 'POST', 'ANY'}:
+                    if decorator_name in Method.ALLOWED_METHODS:
                         http_decorator = True
                         is_lambda_http = True
                         #First argument should be path

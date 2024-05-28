@@ -44,7 +44,7 @@ Lastly you can setup custom environments, layers, security groups, vpcs a Lambda
     from aws_cdk import Duration
 
     builder = ResourceBuilder()
-    builder.set_default_timeout(Duration.seconds(120))
+    builder.set_default_timeout(Duration.seconds(30))
     builder.add_common_environment("DATABASE_URI", "something-db-related")
     builder.add_custom_environment("URL-PREFIX", "calra-cdk-") #Lambda Function should have decorator @environment("URL-PREFIX")
 ```
