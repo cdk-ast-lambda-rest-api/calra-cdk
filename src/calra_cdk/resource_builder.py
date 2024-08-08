@@ -2,7 +2,9 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_iam as iam, 
     Duration, 
-    aws_apigateway as apigateway, 
+    aws_apigateway as apigateway,
+    aws_apigatewayv2 as apigateway2,
+    aws_apigatewayv2_integrations as integrations,
     aws_lambda as lambda_, 
     aws_lambda_python_alpha as _lambda_python)
 import os
@@ -214,7 +216,20 @@ class ResourceBuilder():
         graph = ast_helper.get_lambda_graph(lambda_path)
         if print_tree:
             ast_helper.dump_tree(graph)
-        self.build_from_graph(construct, graph, api_resource)
+        self.build_from_graph(construct, graph, api_resource)    
+
+    def build_http(self, construct, http_api: apigateway2.HttpApi, lambda_path:str, print_tree: bool = False):
+        '''
+        Dynamically create Lambda Functions and Rest Api resources based on the options assigned to the builder.
+        @param construct: Stack which new resources and functions will be assigned to.
+        @param api_resource: REST API root resource from which the new resources/endpoints will be added.
+        @param lambda_path: Relative path (from cdk project workspace root dir) to the lambda functions defined.
+        @param print_tree: Optional value to output to terminal the API and functions built in a tree syntaxis.. Defaults to False.
+        '''
+        graph = ast_helper.get_lambda_graph(lambda_path)
+        if print_tree:
+            ast_helper.dump_tree(graph)
+        self.build_http_from_graph(construct, graph, http_api)    
 
     def get_options(self, decorators:dict) -> dict:
         options = {}
@@ -313,3 +328,39 @@ class ResourceBuilder():
 
         for node in graph.get_connections():
             self.build_from_graph(construct, node, new_resource)
+        
+    def build_http_from_graph(self, construct, graph: ast_helper.Resource, http_api: apigateway2.HttpApi, ):
+        method_mapping = {
+            'GET': apigateway2.HttpMethod.GET,
+            'POST': apigateway2.HttpMethod.POST,
+            'PUT': apigateway2.HttpMethod.PUT,
+            'DELETE': apigateway2.HttpMethod.DELETE,
+            'PATCH': apigateway2.HttpMethod.PATCH,
+            'OPTIONS': apigateway2.HttpMethod.OPTIONS,
+            'HEAD': apigateway2.HttpMethod.HEAD,
+        }
+        path = graph.get_path()
+        level = path.count('/')
+        if level <= 1 and len(path) <= 1: #root '/'
+            # new_resource = api_resource
+            for method in graph.get_methods():
+                lbda = self.build_lambda_function(construct, method)
+                api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id}ApiLambdaIntegration",lbda)
+                http_api.add_routes(
+                    path='/',
+                    methods=[method_mapping[method.get_method()]],
+                    integration= api_lbda_integration
+                )
+        else:
+            for method in graph.get_methods():
+                lbda = self.build_lambda_function(construct, method)
+                api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id}ApiLambdaIntegration",lbda)
+                http_api.add_routes(
+                    path=path,
+                    methods=[method_mapping[method.get_method()]],
+                    integration= api_lbda_integration
+                )
+
+        for node in graph.get_connections():
+            self.build_http_from_graph(construct, node, http_api)
+
