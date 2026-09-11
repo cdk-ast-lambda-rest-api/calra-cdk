@@ -2,6 +2,8 @@ pycache
 .venv
 build
 dist
-calra_cdk.egg-info
+lambda_api_decorators_cdk.egg-info
 .idea
 TODO.txt
+__pycache__/
+*.py[cod]
