@@ -8,12 +8,12 @@ from aws_cdk import (
     aws_lambda as lambda_, 
     aws_lambda_python_alpha as _lambda_python)
 import os
-from calra_cdk import ast_helper
+from lambda_api_decorators_cdk import ast_helper
 from typing import Optional, List, Dict
 
 class ResourceBuilder():
     '''
-    Entrypoint to calra_cdk's functionality. Create a Builder object and set the custom requirements for your Lambda Functions.
+    Entrypoint to lambda_api_decorators_cdk's functionality. Create a Builder object and set the custom requirements for your Lambda Functions.
 
     Refer to the constructor method to get started instantiating a builder. 
 
