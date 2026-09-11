@@ -26,15 +26,15 @@ class ResourceBuilder():
                 default_memory_size: Optional[int] = None,
                 default_vpc = None,
                 default_role: Optional[iam.Role] = None,
-                common_layers: List = [],
-                common_security_groups: List[ec2.SecurityGroup] = [],
-                common_environments: Dict[str, str] = {},
-                custom_runtimes: Dict[str, lambda_.Runtime] = {},
-                custom_roles: Dict[str, iam.Role] = {},
-                custom_layers: Dict[str, None] = {}, ####TODO
-                custom_environments: Dict[str, str] = {},
-                custom_security_groups: Dict[str, ec2.SecurityGroup] = {},
-                custom_vpcs = {} ####TODO
+                common_layers: Optional[List] = None,
+                common_security_groups: Optional[List[ec2.SecurityGroup]] = None,
+                common_environments: Optional[Dict[str, str]] = None,
+                custom_runtimes: Optional[Dict[str, lambda_.Runtime]] = None,
+                custom_roles: Optional[Dict[str, iam.Role]] = None,
+                custom_layers: Optional[Dict[str, None]] = None, ####TODO
+                custom_environments: Optional[Dict[str, str]] = None,
+                custom_security_groups: Optional[Dict[str, ec2.SecurityGroup]] = None,
+                custom_vpcs = None ####TODO
                 ) -> 'ResourceBuilder':
     
         '''
@@ -62,16 +62,16 @@ class ResourceBuilder():
         self.default_vpc = default_vpc
         self.default_role = default_role
         
-        self.common_layers = common_layers
-        self.common_security_groups = common_security_groups
-        self.common_environments = common_environments
+        self.common_layers = common_layers if common_layers is not None else []
+        self.common_security_groups = common_security_groups if common_security_groups is not None else []
+        self.common_environments = common_environments if common_environments is not None else {}
         
-        self.custom_runtimes = custom_runtimes
-        self.custom_roles = custom_roles
-        self.custom_layers = custom_layers
-        self.custom_environments = custom_environments
-        self.custom_security_groups = custom_security_groups
-        self.custom_vpcs = custom_vpcs
+        self.custom_runtimes = custom_runtimes if custom_runtimes is not None else {}
+        self.custom_roles = custom_roles if custom_roles is not None else {}
+        self.custom_layers = custom_layers if custom_layers is not None else {}
+        self.custom_environments = custom_environments if custom_environments is not None else {}
+        self.custom_security_groups = custom_security_groups if custom_security_groups is not None else {}
+        self.custom_vpcs = custom_vpcs if custom_vpcs is not None else {}
 
         self.custom_runtimes.update({'python3.8':lambda_.Runtime.PYTHON_3_8})
         self.custom_runtimes.update({'python3.9':lambda_.Runtime.PYTHON_3_9})
@@ -135,7 +135,7 @@ class ResourceBuilder():
 
     def add_custom_security_group(self, key: str, value: ec2.SecurityGroup):
         '''Add a custom security group for every lambda function with the decorator @security_group(key).'''
-        self.custom_layers.update({key:value})
+        self.custom_security_groups.update({key:value})
 
 
     #Getters
@@ -173,32 +173,32 @@ class ResourceBuilder():
         return self.common_environments[value]
     
     def get_custom_layer(self, value: str) -> lambda_.LayerVersion | _lambda_python.PythonLayerVersion:
-        if self.custom_layers.get(value):
+        if value in self.custom_layers:
             return self.custom_layers[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom layer')
+        else: raise KeyError(f'Value {value} not previously declared as custom layer')
 
     def get_custom_roles(self):
         return self.custom_roles
     
     def get_custom_role(self, value: str) -> iam.Role:
-        if self.custom_roles.get(value):
+        if value in self.custom_roles:
             return self.custom_roles[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom role')
+        else: raise KeyError(f'Value {value} not previously declared as custom role')
     
     def get_custom_security_group(self, value: str) -> ec2.SecurityGroup:
-        if self.custom_security_groups.get(value):
+        if value in self.custom_security_groups:
             return self.custom_security_groups[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom security group')
+        else: raise KeyError(f'Value {value} not previously declared as custom security group')
     
     def get_custom_environment(self, value: str) -> str:
-        if self.custom_environments.get(value):
+        if value in self.custom_environments:
             return self.custom_environments[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom environment')
+        else: raise KeyError(f'Value {value} not previously declared as custom environment')
     
     def get_custom_runtime(self, value: str) -> lambda_.Runtime: 
-        if self.custom_runtimes.get(value):
+        if value in self.custom_runtimes:
             return self.custom_runtimes[value]
-        else: raise KeyError(name=f'Value {value} not previously declared as custom runtime')
+        else: raise KeyError(f'Value {value} not previously declared as custom runtime')
     
     def get_custom_vpc(self, value: str) -> tuple:
         #TODO
@@ -260,11 +260,11 @@ class ResourceBuilder():
                 else:
                     options[key].append(self.get_custom_layer(value))
             elif key == 'role':
-                options[key].append(self.get_custom_role(value))
+                options[key] = self.get_custom_role(value)
             elif key == 'security_group':
                 if type(value) == list:
                     for v in value:
-                        options[key].append(self.get_custom_environment(v))
+                        options[key].append(self.get_custom_security_group(v))
                 else:
                     options[key].append(self.get_custom_security_group(value))
             elif key == 'environment':
@@ -285,6 +285,9 @@ class ResourceBuilder():
         file = method.get_file()
         entry_path = method.get_path_to_file()
         options = self.get_options(method.get_decorators())
+        vpc_options = options['vpc']
+        vpc = vpc_options[0] if vpc_options is not None else None
+        vpc_subnets = vpc_options[1] if vpc_options is not None else None
         lambda_function = _lambda_python.PythonFunction(
             construct, logical_id,
             function_name = options['name'] if options['name'] else logical_id,
@@ -297,8 +300,8 @@ class ResourceBuilder():
             layers = options['layer'],
             memory_size=options['memory_size'],
             security_groups= options['security_group'],
-            vpc= None, 
-            vpc_subnets= None, 
+            vpc=vpc,
+            vpc_subnets=vpc_subnets,
             allow_public_subnet=False,
             environment= options['environment'],
             role= options['role'] 
@@ -316,7 +319,7 @@ class ResourceBuilder():
                 new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
         else:
             #We can get a skip from /something to /something/one/two/method, so resources with no methods "one" and "two" should be created
-            new_api_resources = path[len(api_resource.path)+1:].split('/')
+            new_api_resources = path[len(api_resource.path):].lstrip('/').split('/')
             if len(new_api_resources) > 1: #Resources with no methods associated need to be created. No possible conflict because graph is sorted.
                 for res in new_api_resources[:-1]: # Exclude last resource that will be created w/lambda
                     api_resource = api_resource.add_resource(res)
@@ -345,7 +348,7 @@ class ResourceBuilder():
             # new_resource = api_resource
             for method in graph.get_methods():
                 lbda = self.build_lambda_function(construct, method)
-                api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id}ApiLambdaIntegration",lbda)
+                api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id()}ApiLambdaIntegration",lbda)
                 http_api.add_routes(
                     path='/',
                     methods=[method_mapping[method.get_method()]],
@@ -354,7 +357,7 @@ class ResourceBuilder():
         else:
             for method in graph.get_methods():
                 lbda = self.build_lambda_function(construct, method)
-                api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id}ApiLambdaIntegration",lbda)
+                api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id()}ApiLambdaIntegration",lbda)
                 http_api.add_routes(
                     path=path,
                     methods=[method_mapping[method.get_method()]],
@@ -363,4 +366,3 @@ class ResourceBuilder():
 
         for node in graph.get_connections():
             self.build_http_from_graph(construct, node, http_api)
-

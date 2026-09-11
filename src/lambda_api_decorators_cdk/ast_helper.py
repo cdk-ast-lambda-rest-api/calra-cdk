@@ -90,7 +90,7 @@ class Resource:
 
     def includes_path(self, sub_path) -> bool:
         '''Will indicate if another's Resource path is a ramification of the present Resource'''
-        return True if sub_path.startswith(self.path) else False
+        return self.path == '/' or sub_path == self.path or sub_path.startswith(self.path.rstrip('/') + '/')
 
     def connect(self, resource: 'Resource') -> bool:
         if self.includes_path(resource.get_path()) and resource not in self.get_connections():
@@ -129,7 +129,7 @@ class Resource:
                 self.connect(connection)
             return True
         
-        if len(resource_path) < len(self.get_path()) and self.get_path().startswith(resource_path): #Given resource comes before current, so we have to switch them
+        if len(resource_path) < len(self.get_path()) and resource.includes_path(self.get_path()): #Given resource comes before current, so we have to switch them
             # aux = self.clone()
             # self.methods = resource.get_methods()
             # self.connections = resource.get_connections()
@@ -138,7 +138,7 @@ class Resource:
             # return True
             return self.switch_nodes(resource)
         
-        if len(resource_path) >= len(self.get_path()) and resource_path.startswith(self.get_path()): #Resource goes deeper or bifurcation
+        if len(resource_path) >= len(self.get_path()) and self.includes_path(resource_path): #Resource goes deeper or bifurcation
             if len(self.get_connections()) < 1:
                 self.connect(resource)
                 return True
@@ -146,14 +146,14 @@ class Resource:
                 matching_node = self
                 matching_prefix_index = self.get_matching_prefix_index(resource_path)
                 for node in self.get_connections(): # Check if it goes deeper or may come in between two nodes
-                    if node.get_path() in resource_path: #deeper candidate
+                    if node.includes_path(resource_path): #deeper candidate
                         node_matching_index = node.get_matching_prefix_index(resource_path)
                         if node_matching_index > matching_prefix_index:
                             matching_prefix_index = node_matching_index
                             matching_node = node
-                    elif resource_path in node.get_path(): #It comes in between, so we have to switch them or guess if it goes deeper
+                    elif resource.includes_path(node.get_path()): #It comes in between, so we have to switch them or guess if it goes deeper
                         return node.insert_node(resource)
-                if resource_path.startswith(matching_node.get_path()) and matching_node.get_path() not in self.get_path(): #Goes deeper/recursion
+                if matching_node.includes_path(resource_path) and matching_node.get_path() != self.get_path(): #Goes deeper/recursion
                     return matching_node.insert_node(resource)
                 else: #Bifurcation
                     self.connect(resource)
@@ -175,7 +175,7 @@ def get_file_nodes(parsed_tree, id, directory):
             is_lambda_http = False
             method_decorators = {}
             func_name = node.name
-            paths = {} #A handler could have multiple paths with multiple HTTP methods
+            paths = [] #A handler could have multiple paths with multiple HTTP methods
             for decorator in node.decorator_list:
                 if isinstance(decorator, ast.Call):
                     http_decorator = False
@@ -186,19 +186,25 @@ def get_file_nodes(parsed_tree, id, directory):
                         http_decorator = True
                         is_lambda_http = True
                         #First argument should be path
-                        path = decorator.args[0].s
+                        path = decorator.args[0].value
                         if http_decorator:
-                            paths.update({path:decorator_name})
+                            paths.append((path, decorator_name))
                     else:
                         if len(decorator.args) > 1:
-                            args = [arg.s for arg in decorator.args]
-                            method_decorators.setdefault(decorator_name, []).extend(args)
+                            value = [arg.value for arg in decorator.args]
                         else:
                             if isinstance(decorator.args[0], ast.List):
-                                value = [elt.s for elt in decorator.args[0].elts]
+                                value = [elt.value for elt in decorator.args[0].elts]
                             else:
-                                value = decorator.args[0].s
-                            method_decorators.setdefault(decorator_name, value) 
+                                value = decorator.args[0].value
+                        if decorator_name in method_decorators:
+                            current = method_decorators[decorator_name]
+                            if not isinstance(current, list):
+                                current = [current]
+                                method_decorators[decorator_name] = current
+                            current.extend(value if isinstance(value, list) else [value])
+                        else:
+                            method_decorators[decorator_name] = value
                 else:
                     # Handle decorators without arguments
                     decorator_name = ast.unparse(decorator).strip()
@@ -207,7 +213,7 @@ def get_file_nodes(parsed_tree, id, directory):
 
             #ast.FunctionDef ends. If the Function had an HTTP Decorator it means it's a lambda function
             if is_lambda_http: 
-                for key,value in paths.items():
+                for key,value in paths:
                     #If id (file) is at the root of directory, no change needed. Else we need to only get the file
                     filepath = id[id.rindex(os.sep)+1:] if id.count(os.sep) > 0 else id 
                     #Concatenate directory to id (file) for lambda entry point /  separate "index" file from path
