@@ -1,4 +1,5 @@
 import inspect
+from enum import Enum
 
 import pytest
 from aws_cdk import App, Stack, aws_apigateway as apigateway
@@ -12,12 +13,29 @@ class RecordingBuilder:
     def __init__(self):
         self.rest_calls = []
         self.http_calls = []
+        self.rest_layouts = []
+        self.http_layouts = []
 
-    def build(self, *args):
+    def build(self, *args, source_layout=None):
         self.rest_calls.append(args)
+        self.rest_layouts.append(source_layout)
 
-    def build_http(self, *args):
+    def build_http(self, *args, source_layout=None):
         self.http_calls.append(args)
+        self.http_layouts.append(source_layout)
+
+
+class _FutureSourceLayout(Enum):
+    ROOT = "root"
+    SERVICE = "service"
+
+
+def source_layout(name):
+    try:
+        from lambda_api_decorators_cdk import SourceLayout
+    except ImportError:
+        SourceLayout = _FutureSourceLayout
+    return SourceLayout[name]
 
 
 @pytest.fixture
@@ -54,15 +72,48 @@ def test_rest_is_default_and_builds_under_construct(stack, builders, explicit):
     assert builders[0].http_calls == []
 
 
-def test_lambda_api_constructor_has_only_block1_parameters():
+def test_lambda_api_constructor_has_block2_source_layout_parameter():
     parameters = inspect.signature(LambdaApi.__init__).parameters
     assert list(parameters) == [
-        "self", "scope", "construct_id", "lambda_path", "api", "api_type", "config"]
-    for name in ("lambda_path", "api", "api_type", "config"):
+        "self", "scope", "construct_id", "lambda_path", "source_layout",
+        "api", "api_type", "config"]
+    for name in ("lambda_path", "source_layout", "api", "api_type", "config"):
         assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
     assert not {
-        "layers_path", "source_layout", "api_resource", "print_tree"
+        "layers_path", "api_resource", "print_tree"
     }.intersection(parameters)
+
+
+@pytest.mark.parametrize("api_type, call_kind", [
+    (ApiType.REST, "rest"),
+    (ApiType.HTTP, "http"),
+])
+def test_lambda_api_defaults_source_layout_to_root_at_build_boundary(
+        stack, builders, api_type, call_kind):
+    LambdaApi(stack, "Api", lambda_path="lambdas", api_type=api_type)
+    assert getattr(builders[0], f"{call_kind}_layouts") == [source_layout("ROOT")]
+
+
+@pytest.mark.parametrize("api_type, call_kind", [
+    (ApiType.REST, "rest"),
+    (ApiType.HTTP, "http"),
+])
+@pytest.mark.parametrize("layout_name", ["ROOT", "SERVICE"])
+def test_lambda_api_propagates_explicit_source_layout(
+        stack, builders, api_type, call_kind, layout_name):
+    layout = source_layout(layout_name)
+    LambdaApi(
+        stack, "Api", lambda_path="lambdas", api_type=api_type,
+        source_layout=layout,
+    )
+    assert getattr(builders[0], f"{call_kind}_layouts") == [layout]
+
+
+@pytest.mark.parametrize("value", ["root", "service"])
+def test_lambda_api_rejects_string_source_layout_before_build(stack, builders, value):
+    with pytest.raises(TypeError):
+        LambdaApi(stack, "Api", lambda_path="lambdas", source_layout=value)
+    assert builders == []
 
 
 def test_explicit_http_builds_under_construct(stack, builders):
@@ -159,6 +210,7 @@ def test_reused_config_creates_fresh_builders_and_separate_subtrees(
     def create(self):
         builder = original(self)
         builder.rest_calls, builder.http_calls = [], []
+        builder.rest_layouts, builder.http_layouts = [], []
         monkeypatch.setattr(builder, "build", RecordingBuilder.build.__get__(builder))
         monkeypatch.setattr(builder, "build_http", RecordingBuilder.build_http.__get__(builder))
         created.append(builder)
@@ -176,6 +228,36 @@ def test_reused_config_creates_fresh_builders_and_separate_subtrees(
     assert created[1].common_layers == [layer]
 
 
+def test_reused_config_builds_with_independent_source_layouts(stack, monkeypatch):
+    created = []
+    config = LambdaApiConfig()
+    original = LambdaApiConfig._create_resource_builder
+
+    def create(self):
+        builder = original(self)
+        builder.rest_calls, builder.http_calls = [], []
+        builder.rest_layouts, builder.http_layouts = [], []
+        monkeypatch.setattr(builder, "build", RecordingBuilder.build.__get__(builder))
+        monkeypatch.setattr(
+            builder, "build_http", RecordingBuilder.build_http.__get__(builder))
+        created.append(builder)
+        return builder
+
+    monkeypatch.setattr(LambdaApiConfig, "_create_resource_builder", create)
+    LambdaApi(
+        stack, "RootApi", lambda_path="root", config=config,
+        source_layout=source_layout("ROOT"),
+    )
+    LambdaApi(
+        stack, "ServiceApi", lambda_path="services", config=config,
+        source_layout=source_layout("SERVICE"),
+    )
+
+    assert created[0] is not created[1]
+    assert created[0].rest_layouts == [source_layout("ROOT")]
+    assert created[1].rest_layouts == [source_layout("SERVICE")]
+
+
 def test_custom_config_registration_reaches_lambda_api_builder(stack, monkeypatch):
     layer, captured = object(), []
     config = LambdaApiConfig()
@@ -185,6 +267,7 @@ def test_custom_config_registration_reaches_lambda_api_builder(stack, monkeypatc
     def create(self):
         builder = original(self)
         builder.rest_calls, builder.http_calls = [], []
+        builder.rest_layouts, builder.http_layouts = [], []
         monkeypatch.setattr(builder, "build", RecordingBuilder.build.__get__(builder))
         monkeypatch.setattr(builder, "build_http", RecordingBuilder.build_http.__get__(builder))
         captured.append(builder)

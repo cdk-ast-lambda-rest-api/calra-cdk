@@ -8,7 +8,9 @@ from aws_cdk import (
     aws_lambda as lambda_, 
     aws_lambda_python_alpha as _lambda_python)
 import os
+from pathlib import Path
 from lambda_api_decorators_cdk import ast_helper
+from lambda_api_decorators_cdk.source_layout import SourceLayout
 from typing import Optional, List, Dict
 
 class ResourceBuilder():
@@ -204,7 +206,9 @@ class ResourceBuilder():
         #TODO
         return self.custom_vpcs[value]
 
-    def build(self, construct, api_resource: apigateway.IResource, lambda_path:str, print_tree: bool = False):
+    def build(self, construct, api_resource: apigateway.IResource, lambda_path:str,
+              print_tree: bool = False,
+              source_layout: SourceLayout = SourceLayout.ROOT):
         '''
         Dynamically create Lambda Functions and Rest Api resources based on the options assigned to the builder.
         @param construct: Stack which new resources and functions will be assigned to.
@@ -213,12 +217,17 @@ class ResourceBuilder():
         @param print_tree: Optional value to output to terminal the API and functions built in a tree syntaxis.. Defaults to False.
         '''
 
-        graph = ast_helper.get_lambda_graph(lambda_path)
+        self._validate_source_layout(source_layout)
+        lambda_root = Path(lambda_path).resolve()
+        graph = ast_helper.get_lambda_graph(str(lambda_root))
         if print_tree:
             ast_helper.dump_tree(graph)
-        self.build_from_graph(construct, graph, api_resource)    
+        self.build_from_graph(
+            construct, graph, api_resource, lambda_root, source_layout)
 
-    def build_http(self, construct, http_api: apigateway2.HttpApi, lambda_path:str, print_tree: bool = False):
+    def build_http(self, construct, http_api: apigateway2.HttpApi,
+                   lambda_path:str, print_tree: bool = False,
+                   source_layout: SourceLayout = SourceLayout.ROOT):
         '''
         Dynamically create Lambda Functions and Rest Api resources based on the options assigned to the builder.
         @param construct: Stack which new resources and functions will be assigned to.
@@ -226,10 +235,40 @@ class ResourceBuilder():
         @param lambda_path: Relative path (from cdk project workspace root dir) to the lambda functions defined.
         @param print_tree: Optional value to output to terminal the API and functions built in a tree syntaxis.. Defaults to False.
         '''
-        graph = ast_helper.get_lambda_graph(lambda_path)
+        self._validate_source_layout(source_layout)
+        lambda_root = Path(lambda_path).resolve()
+        graph = ast_helper.get_lambda_graph(str(lambda_root))
         if print_tree:
             ast_helper.dump_tree(graph)
-        self.build_http_from_graph(construct, graph, http_api)    
+        self.build_http_from_graph(
+            construct, graph, http_api, lambda_root, source_layout)
+
+    @staticmethod
+    def _validate_source_layout(source_layout: SourceLayout):
+        if not isinstance(source_layout, SourceLayout):
+            raise TypeError("source_layout must be a SourceLayout")
+
+    @staticmethod
+    def _resolve_source(method: ast_helper.Method, lambda_root: Path,
+                        source_layout: SourceLayout):
+        handler_path = (
+            Path(method.get_path_to_file()) / method.get_file()
+        ).resolve()
+        relative_handler = handler_path.relative_to(lambda_root)
+
+        if source_layout is SourceLayout.ROOT:
+            return lambda_root, relative_handler.as_posix()
+
+        if len(relative_handler.parts) < 2:
+            raise ValueError(
+                "SERVICE source layout requires handlers to live inside "
+                "a first-level service directory beneath lambda_path"
+            )
+        service = relative_handler.parts[0]
+        return (
+            lambda_root / service,
+            Path(*relative_handler.parts[1:]).as_posix(),
+        )
 
     def get_options(self, decorators:dict) -> dict:
         options = {}
@@ -277,13 +316,20 @@ class ResourceBuilder():
                 options[key] = self.get_custom_vpc(value)
         return options
 
-    def build_lambda_function(self, construct, method: ast_helper.Method):
+    def build_lambda_function(self, construct, method: ast_helper.Method,
+                              lambda_root: Optional[Path] = None,
+                              source_layout: SourceLayout = SourceLayout.ROOT):
         # Create Lambda function with aggregated metadata from all decorators
 
         logical_id = method.get_logical_id()
         handler = method.get_handler()
-        file = method.get_file()
-        entry_path = method.get_path_to_file()
+        if lambda_root is None:
+            file = method.get_file()
+            entry_path = method.get_path_to_file()
+        else:
+            entry_path, file = self._resolve_source(
+                method, lambda_root, source_layout)
+            entry_path = str(entry_path)
         options = self.get_options(method.get_decorators())
         vpc_options = options['vpc']
         vpc = vpc_options[0] if vpc_options is not None else None
@@ -308,14 +354,25 @@ class ResourceBuilder():
         )
         return lambda_function
 
-    def build_from_graph(self, construct, graph: ast_helper.Resource, api_resource: apigateway.IResource):
+    def _build_discovered_lambda(self, construct, method, lambda_root,
+                                 source_layout):
+        if lambda_root is None:
+            return self.build_lambda_function(construct, method)
+        return self.build_lambda_function(
+            construct, method, lambda_root, source_layout)
+
+    def build_from_graph(self, construct, graph: ast_helper.Resource,
+                         api_resource: apigateway.IResource,
+                         lambda_root: Optional[Path] = None,
+                         source_layout: SourceLayout = SourceLayout.ROOT):
 
         path = graph.get_path()
         level = path.count('/')
         if level <= 1 and len(path) <= 1: #root '/'
             new_resource = api_resource
             for method in graph.get_methods():
-                lbda = self.build_lambda_function(construct, method)
+                lbda = self._build_discovered_lambda(
+                    construct, method, lambda_root, source_layout)
                 new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
         else:
             #We can get a skip from /something to /something/one/two/method, so resources with no methods "one" and "two" should be created
@@ -326,13 +383,18 @@ class ResourceBuilder():
             resource_name = path[path.rindex('/')+1:] #Now we can create the resource associated with the node even if 
             new_resource = api_resource.add_resource(resource_name)
             for method in graph.get_methods():
-                lbda = self.build_lambda_function(construct, method)
+                lbda = self._build_discovered_lambda(
+                    construct, method, lambda_root, source_layout)
                 new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
 
         for node in graph.get_connections():
-            self.build_from_graph(construct, node, new_resource)
+            self.build_from_graph(
+                construct, node, new_resource, lambda_root, source_layout)
         
-    def build_http_from_graph(self, construct, graph: ast_helper.Resource, http_api: apigateway2.HttpApi, ):
+    def build_http_from_graph(self, construct, graph: ast_helper.Resource,
+                              http_api: apigateway2.HttpApi,
+                              lambda_root: Optional[Path] = None,
+                              source_layout: SourceLayout = SourceLayout.ROOT):
         method_mapping = {
             'GET': apigateway2.HttpMethod.GET,
             'POST': apigateway2.HttpMethod.POST,
@@ -347,7 +409,8 @@ class ResourceBuilder():
         if level <= 1 and len(path) <= 1: #root '/'
             # new_resource = api_resource
             for method in graph.get_methods():
-                lbda = self.build_lambda_function(construct, method)
+                lbda = self._build_discovered_lambda(
+                    construct, method, lambda_root, source_layout)
                 api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id()}ApiLambdaIntegration",lbda)
                 http_api.add_routes(
                     path='/',
@@ -356,7 +419,8 @@ class ResourceBuilder():
                 )
         else:
             for method in graph.get_methods():
-                lbda = self.build_lambda_function(construct, method)
+                lbda = self._build_discovered_lambda(
+                    construct, method, lambda_root, source_layout)
                 api_lbda_integration = integrations.HttpLambdaIntegration(f"{method.get_logical_id()}ApiLambdaIntegration",lbda)
                 http_api.add_routes(
                     path=path,
@@ -365,4 +429,5 @@ class ResourceBuilder():
                 )
 
         for node in graph.get_connections():
-            self.build_http_from_graph(construct, node, http_api)
+            self.build_http_from_graph(
+                construct, node, http_api, lambda_root, source_layout)

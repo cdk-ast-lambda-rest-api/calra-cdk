@@ -27,3 +27,23 @@ def test_api_type_is_enum_with_stable_values():
     assert issubclass(ApiType, Enum)
     assert ApiType.REST.value == "rest"
     assert ApiType.HTTP.value == "http"
+
+
+def test_source_layout_is_exported_from_package_and_direct_module():
+    from lambda_api_decorators_cdk import SourceLayout
+    from lambda_api_decorators_cdk.source_layout import (
+        SourceLayout as DirectSourceLayout,
+    )
+
+    assert SourceLayout is DirectSourceLayout
+
+
+def test_source_layout_is_a_non_string_enum_with_exact_stable_members():
+    from lambda_api_decorators_cdk import SourceLayout
+
+    assert issubclass(SourceLayout, Enum)
+    assert not issubclass(SourceLayout, str)
+    assert {member.name: member.value for member in SourceLayout} == {
+        "ROOT": "root",
+        "SERVICE": "service",
+    }
