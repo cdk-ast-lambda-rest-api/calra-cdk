@@ -6,6 +6,7 @@ from constructs import Construct
 
 from .api_type import ApiType
 from .lambda_api_config import LambdaApiConfig
+from .source_layout import SourceLayout
 
 
 class LambdaApi(Construct):
@@ -17,6 +18,7 @@ class LambdaApi(Construct):
         construct_id: str,
         *,
         lambda_path: str,
+        source_layout: SourceLayout = SourceLayout.ROOT,
         api: Optional[
             Union[apigateway.IRestApi, apigatewayv2.HttpApi]
         ] = None,
@@ -25,6 +27,8 @@ class LambdaApi(Construct):
     ) -> None:
         super().__init__(scope, construct_id)
 
+        if not isinstance(source_layout, SourceLayout):
+            raise TypeError("source_layout must be a SourceLayout")
         if config is not None and not isinstance(config, LambdaApiConfig):
             raise TypeError("config must be a LambdaApiConfig or None")
         if api_type is not None and not isinstance(api_type, ApiType):
@@ -50,9 +54,11 @@ class LambdaApi(Construct):
         resource_builder = resolved_config._create_resource_builder()
 
         if resolved_type is ApiType.REST:
-            resource_builder.build(self, api.root, lambda_path)
+            resource_builder.build(
+                self, api.root, lambda_path, source_layout=source_layout)
         else:
-            resource_builder.build_http(self, api, lambda_path)
+            resource_builder.build_http(
+                self, api, lambda_path, source_layout=source_layout)
 
     @staticmethod
     def _infer_api_type(api: object) -> ApiType:
