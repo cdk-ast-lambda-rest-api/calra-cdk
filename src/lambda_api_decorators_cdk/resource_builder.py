@@ -208,7 +208,8 @@ class ResourceBuilder():
 
     def build(self, construct, api_resource: apigateway.IResource, lambda_path:str,
               print_tree: bool = False,
-              source_layout: SourceLayout = SourceLayout.ROOT):
+              source_layout: SourceLayout = SourceLayout.ROOT,
+              layers_path: Optional[str] = None):
         '''
         Dynamically create Lambda Functions and Rest Api resources based on the options assigned to the builder.
         @param construct: Stack which new resources and functions will be assigned to.
@@ -219,15 +220,18 @@ class ResourceBuilder():
 
         self._validate_source_layout(source_layout)
         lambda_root = Path(lambda_path).resolve()
+        layer_sources = self._discover_layer_sources(layers_path)
         graph = ast_helper.get_lambda_graph(str(lambda_root))
         if print_tree:
             ast_helper.dump_tree(graph)
+        self._prepare_layers(construct, graph, layer_sources)
         self.build_from_graph(
             construct, graph, api_resource, lambda_root, source_layout)
 
     def build_http(self, construct, http_api: apigateway2.HttpApi,
                    lambda_path:str, print_tree: bool = False,
-                   source_layout: SourceLayout = SourceLayout.ROOT):
+                   source_layout: SourceLayout = SourceLayout.ROOT,
+                   layers_path: Optional[str] = None):
         '''
         Dynamically create Lambda Functions and Rest Api resources based on the options assigned to the builder.
         @param construct: Stack which new resources and functions will be assigned to.
@@ -237,11 +241,150 @@ class ResourceBuilder():
         '''
         self._validate_source_layout(source_layout)
         lambda_root = Path(lambda_path).resolve()
+        layer_sources = self._discover_layer_sources(layers_path)
         graph = ast_helper.get_lambda_graph(str(lambda_root))
         if print_tree:
             ast_helper.dump_tree(graph)
+        self._prepare_layers(construct, graph, layer_sources)
         self.build_http_from_graph(
             construct, graph, http_api, lambda_root, source_layout)
+
+    @staticmethod
+    def _discover_layer_sources(layers_path: Optional[str]):
+        if layers_path is None:
+            return None
+
+        layers_root = Path(layers_path).resolve()
+        if not layers_root.exists():
+            raise ValueError(f"layers_path does not exist: {layers_root}")
+        if not layers_root.is_dir():
+            raise ValueError(f"layers_path is not a directory: {layers_root}")
+
+        return {
+            child.name: child
+            for child in sorted(layers_root.iterdir(), key=lambda path: path.name)
+            if not child.name.startswith('.')
+            and child.name != '__pycache__'
+            and child.is_dir()
+        }
+
+    @staticmethod
+    def _iter_methods(graph: ast_helper.Resource):
+        methods = []
+
+        def visit(resource):
+            for method in resource.get_methods():
+                methods.append((resource.get_path(), method))
+            for child in resource.get_connections():
+                visit(child)
+
+        visit(graph)
+        methods.sort(key=lambda item: (
+            item[1].get_path_to_file(),
+            item[1].get_file(),
+            item[1].get_handler(),
+            item[0],
+            item[1].get_method(),
+        ))
+        return [method for _, method in methods]
+
+    def _resolve_runtime(self, decorators: dict):
+        runtime = self.get_default_runtime()
+        if 'runtime' in decorators:
+            runtime = self.get_custom_runtime(decorators['runtime'])
+        return runtime
+
+    @staticmethod
+    def _runtime_name(runtime):
+        try:
+            name = runtime.name
+        except Exception as error:
+            raise ValueError("Runtime compatibility metadata is unreadable") from error
+        if not isinstance(name, str):
+            raise ValueError("Runtime compatibility metadata is unusable")
+        return name
+
+    def _validate_explicit_layer(self, layer, runtime, identifier):
+        try:
+            compatible_runtimes = layer.compatible_runtimes
+        except Exception as error:
+            raise ValueError(
+                f"Compatibility metadata for explicit layer {identifier!r} "
+                "is unreadable"
+            ) from error
+
+        if compatible_runtimes is None:
+            return
+        try:
+            declared_names = [
+                self._runtime_name(candidate) for candidate in compatible_runtimes
+            ]
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"Compatibility metadata for explicit layer {identifier!r} "
+                "is unusable"
+            ) from error
+
+        if runtime is None:
+            raise ValueError(
+                f"Explicit layer {identifier!r} requires a concrete Lambda runtime"
+            )
+        runtime_name = self._runtime_name(runtime)
+        if runtime_name not in declared_names:
+            raise ValueError(
+                f"Explicit layer {identifier!r} is not compatible with Lambda "
+                f"runtime {runtime_name!r}; declared compatible runtimes: "
+                f"{declared_names!r}"
+            )
+
+    def _prepare_layers(self, construct, graph, layer_sources):
+        if layer_sources is None:
+            return
+
+        explicit_layer_keys = set(self.custom_layers)
+        required_runtimes = {}
+        for method in self._iter_methods(graph):
+            decorators = method.get_decorators()
+            runtime = self._resolve_runtime(decorators)
+
+            for common_layer in self.common_layers:
+                identifier = getattr(
+                    common_layer, 'layer_version_arn', 'common layer')
+                self._validate_explicit_layer(
+                    common_layer, runtime, identifier)
+
+            requested_layers = decorators.get('layer', [])
+            if not isinstance(requested_layers, list):
+                requested_layers = [requested_layers]
+            for layer_key in requested_layers:
+                if layer_key in explicit_layer_keys:
+                    self._validate_explicit_layer(
+                        self.custom_layers[layer_key], runtime, layer_key)
+                elif layer_key in layer_sources:
+                    if runtime is None:
+                        raise ValueError(
+                            f"Autodiscovered layer {layer_key!r} requires a "
+                            "concrete Lambda runtime"
+                        )
+                    if runtime.family is not lambda_.RuntimeFamily.PYTHON:
+                        raise ValueError(
+                            f"Autodiscovered layer {layer_key!r} requires a "
+                            "Python Lambda runtime"
+                        )
+                    runtime_name = self._runtime_name(runtime)
+                    required_runtimes.setdefault(layer_key, {})\
+                        .setdefault(runtime_name, runtime)
+
+        for layer_key, entry in layer_sources.items():
+            if layer_key not in required_runtimes:
+                continue
+            layer = _lambda_python.PythonLayerVersion(
+                construct,
+                f"AutodiscoveredLayer:{layer_key}",
+                entry=str(entry),
+                compatible_runtimes=list(required_runtimes[layer_key].values()),
+            )
+            self.add_custom_layer(layer_key, layer)
 
     @staticmethod
     def _validate_source_layout(source_layout: SourceLayout):
@@ -272,7 +415,7 @@ class ResourceBuilder():
 
     def get_options(self, decorators:dict) -> dict:
         options = {}
-        options.update({'runtime':self.get_default_runtime()})
+        options.update({'runtime':self._resolve_runtime(decorators)})
         options.update({'memory_size': self.get_default_memory_size()})
         options.update({'timeout': self.get_default_timeout()})
         options.update({'role': self.get_default_role()})
@@ -288,7 +431,7 @@ class ResourceBuilder():
             if key in ['memory_size','description','name']:
                 options.update({key: value})
             elif key ==  'runtime':
-                options[key] = self.get_custom_runtime(value)
+                continue
             elif key == 'timeout':
                 timeout = Duration.seconds(value)
                 options.update({key: timeout})
