@@ -15,14 +15,20 @@ class RecordingBuilder:
         self.http_calls = []
         self.rest_layouts = []
         self.http_layouts = []
+        self.rest_layers_paths = []
+        self.http_layers_paths = []
 
-    def build(self, *args, source_layout=None):
+    def build(self, *args, source_layout=None, layers_path=None):
         self.rest_calls.append(args)
         self.rest_layouts.append(source_layout)
+        if hasattr(self, "rest_layers_paths"):
+            self.rest_layers_paths.append(layers_path)
 
-    def build_http(self, *args, source_layout=None):
+    def build_http(self, *args, source_layout=None, layers_path=None):
         self.http_calls.append(args)
         self.http_layouts.append(source_layout)
+        if hasattr(self, "http_layers_paths"):
+            self.http_layers_paths.append(layers_path)
 
 
 class _FutureSourceLayout(Enum):
@@ -72,16 +78,30 @@ def test_rest_is_default_and_builds_under_construct(stack, builders, explicit):
     assert builders[0].http_calls == []
 
 
-def test_lambda_api_constructor_has_block2_source_layout_parameter():
+def test_lambda_api_constructor_has_layer_autodiscovery_parameter():
     parameters = inspect.signature(LambdaApi.__init__).parameters
     assert list(parameters) == [
         "self", "scope", "construct_id", "lambda_path", "source_layout",
-        "api", "api_type", "config"]
-    for name in ("lambda_path", "source_layout", "api", "api_type", "config"):
+        "layers_path", "api", "api_type", "config"]
+    for name in (
+        "lambda_path", "source_layout", "layers_path", "api", "api_type", "config"
+    ):
         assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
-    assert not {
-        "layers_path", "api_resource", "print_tree"
-    }.intersection(parameters)
+    assert parameters["layers_path"].default is None
+    assert not {"api_resource", "print_tree"}.intersection(parameters)
+
+
+@pytest.mark.parametrize("api_type, call_kind", [
+    (ApiType.REST, "rest"),
+    (ApiType.HTTP, "http"),
+])
+@pytest.mark.parametrize("layers_path", [None, "layers"])
+def test_lambda_api_propagates_layers_path(
+        stack, builders, api_type, call_kind, layers_path):
+    kwargs = {} if layers_path is None else {"layers_path": layers_path}
+    LambdaApi(
+        stack, "Api", lambda_path="lambdas", api_type=api_type, **kwargs)
+    assert getattr(builders[0], f"{call_kind}_layers_paths") == [layers_path]
 
 
 @pytest.mark.parametrize("api_type, call_kind", [

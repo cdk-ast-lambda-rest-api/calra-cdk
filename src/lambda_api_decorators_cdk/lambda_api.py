@@ -19,6 +19,7 @@ class LambdaApi(Construct):
         *,
         lambda_path: str,
         source_layout: SourceLayout = SourceLayout.ROOT,
+        layers_path: Optional[str] = None,
         api: Optional[
             Union[apigateway.IRestApi, apigatewayv2.HttpApi]
         ] = None,
@@ -55,10 +56,12 @@ class LambdaApi(Construct):
 
         if resolved_type is ApiType.REST:
             resource_builder.build(
-                self, api.root, lambda_path, source_layout=source_layout)
+                self, api.root, lambda_path, source_layout=source_layout,
+                layers_path=layers_path)
         else:
             resource_builder.build_http(
-                self, api, lambda_path, source_layout=source_layout)
+                self, api, lambda_path, source_layout=source_layout,
+                layers_path=layers_path)
 
     @staticmethod
     def _infer_api_type(api: object) -> ApiType:
