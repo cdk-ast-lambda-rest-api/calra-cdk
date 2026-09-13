@@ -374,6 +374,8 @@ class ResourceBuilder():
                     runtime_name = self._runtime_name(runtime)
                     required_runtimes.setdefault(layer_key, {})\
                         .setdefault(runtime_name, runtime)
+                else:
+                    self.get_custom_layer(layer_key)
 
         for layer_key, entry in layer_sources.items():
             if layer_key not in required_runtimes:

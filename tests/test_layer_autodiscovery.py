@@ -257,6 +257,17 @@ def test_unknown_and_nested_only_layer_names_remain_strict(
     assert recording_boundaries == ([], [])
 
 
+def test_unknown_layer_fails_before_other_discovered_layers_are_constructed(
+        tmp_path, recording_boundaries):
+    lambda_path, layers_path = tmp_path / "lambdas", tmp_path / "layers"
+    _write_handler(lambda_path / "a.py", route="/a", layers=("common",))
+    _write_handler(lambda_path / "z.py", route="/z", layers=("missing",))
+    (layers_path / "common").mkdir(parents=True)
+    with pytest.raises(KeyError):
+        _build(_builder(), "rest", object(), lambda_path, layers_path)
+    assert recording_boundaries == ([], [])
+
+
 def test_runtime_accumulation_uses_canonical_method_order_and_name_deduplication(
         tmp_path, recording_boundaries):
     lambda_path, layers_path = tmp_path / "lambdas", tmp_path / "layers"
