@@ -75,3 +75,24 @@ class LambdaApiDecoratorsExampleStack(Stack):
         builder.build(self, root_resource, lambda_path, print_tree=True)
 
 ```
+
+## Maintainer releases
+
+The Git tag is the single source of truth for this package's version. For
+example, `v0.3.0` produces Python package version `0.3.0`. This repository is
+versioned independently from `lambda-api-decorators`.
+
+To release from `main`, choose and push a semantic version tag:
+
+```bash
+git checkout main
+git pull
+
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+Pushing the tag triggers the release workflow, which tests, builds, verifies
+the version, and publishes with PyPI trusted publishing. The PyPI project must
+have a trusted publisher configured for this repository, the `release.yml`
+workflow, and the `pypi` GitHub environment.
