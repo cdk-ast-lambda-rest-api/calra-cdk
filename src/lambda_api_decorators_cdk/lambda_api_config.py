@@ -2,8 +2,10 @@ from typing import Mapping, Optional, Sequence
 
 from aws_cdk import Duration
 from aws_cdk import aws_ec2 as ec2
+from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_s3 as s3
 
 from .resource_builder import ResourceBuilder
 
@@ -23,6 +25,8 @@ class LambdaApiConfig:
         layers: Optional[Sequence[lambda_.ILayerVersion]] = None,
         security_groups: Optional[Sequence[ec2.ISecurityGroup]] = None,
         environment: Optional[Mapping[str, str]] = None,
+        dynamodb_tables: Optional[Mapping[str, dynamodb.ITable]] = None,
+        s3_buckets: Optional[Mapping[str, s3.IBucket]] = None,
     ) -> None:
         self._default_runtime = runtime
         self._default_timeout = timeout
@@ -42,6 +46,13 @@ class LambdaApiConfig:
         self._custom_environments = {}
         self._custom_security_groups = {}
         self._custom_vpcs = {}
+
+        self._dynamodb_tables = {}
+        self._s3_buckets = {}
+        for key, table in (dynamodb_tables or {}).items():
+            self.add_dynamodb_table(key, table)
+        for key, bucket in (s3_buckets or {}).items():
+            self.add_s3_bucket(key, bucket)
 
     def set_default_runtime(self, runtime: Optional[lambda_.Runtime]) -> None:
         self._default_runtime = runtime
@@ -100,6 +111,24 @@ class LambdaApiConfig:
     ) -> None:
         self._custom_vpcs[key] = (vpc, vpc_subnets)
 
+    def add_dynamodb_table(self, key: str, table: dynamodb.ITable) -> None:
+        self._add_resource(key, table, self._dynamodb_tables, "DynamoDB table")
+
+    def add_s3_bucket(self, key: str, bucket: s3.IBucket) -> None:
+        self._add_resource(key, bucket, self._s3_buckets, "S3 bucket")
+
+    @staticmethod
+    def _add_resource(key: str, resource, registry: dict, resource_type: str) -> None:
+        if not isinstance(key, str):
+            raise TypeError("Resource registry keys must be strings")
+        if not key.strip():
+            raise ValueError("Resource registry keys must not be empty or whitespace")
+        if resource is None or isinstance(resource, (str, int)):
+            raise TypeError(f"{resource_type} must be a CDK resource object")
+        if key in registry:
+            raise ValueError(f"Resource key {key!r} is already registered")
+        registry[key] = resource
+
     def _create_resource_builder(self) -> ResourceBuilder:
         """Create an isolated builder snapshot without copying CDK resources."""
         return ResourceBuilder(
@@ -117,4 +146,6 @@ class LambdaApiConfig:
             custom_environments=dict(self._custom_environments),
             custom_security_groups=dict(self._custom_security_groups),
             custom_vpcs=dict(self._custom_vpcs),
+            dynamodb_tables=dict(self._dynamodb_tables),
+            s3_buckets=dict(self._s3_buckets),
         )

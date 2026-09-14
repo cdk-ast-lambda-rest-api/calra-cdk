@@ -1,11 +1,13 @@
 from aws_cdk import (
     aws_ec2 as ec2,
+    aws_dynamodb as dynamodb,
     aws_iam as iam, 
     Duration, 
     aws_apigateway as apigateway,
     aws_apigatewayv2 as apigateway2,
     aws_apigatewayv2_integrations as integrations,
-    aws_lambda as lambda_, 
+    aws_lambda as lambda_,
+    aws_s3 as s3,
     aws_lambda_python_alpha as _lambda_python)
 import os
 from pathlib import Path
@@ -36,7 +38,9 @@ class ResourceBuilder():
                 custom_layers: Optional[Dict[str, None]] = None, ####TODO
                 custom_environments: Optional[Dict[str, str]] = None,
                 custom_security_groups: Optional[Dict[str, ec2.SecurityGroup]] = None,
-                custom_vpcs = None ####TODO
+                custom_vpcs = None, ####TODO
+                dynamodb_tables: Optional[Dict[str, dynamodb.ITable]] = None,
+                s3_buckets: Optional[Dict[str, s3.IBucket]] = None,
                 ) -> 'ResourceBuilder':
     
         '''
@@ -56,6 +60,8 @@ class ResourceBuilder():
         @param custom_environments
         @param custom_security_groups
         @param custom_vpcs
+        @param dynamodb_tables
+        @param s3_buckets
         '''
         # Check and set properties based on provided keyword arguments
         self.default_runtime = default_runtime
@@ -74,6 +80,8 @@ class ResourceBuilder():
         self.custom_environments = custom_environments if custom_environments is not None else {}
         self.custom_security_groups = custom_security_groups if custom_security_groups is not None else {}
         self.custom_vpcs = custom_vpcs if custom_vpcs is not None else {}
+        self.dynamodb_tables = dynamodb_tables if dynamodb_tables is not None else {}
+        self.s3_buckets = s3_buckets if s3_buckets is not None else {}
 
         self.custom_runtimes.update({'python3.8':lambda_.Runtime.PYTHON_3_8})
         self.custom_runtimes.update({'python3.9':lambda_.Runtime.PYTHON_3_9})
