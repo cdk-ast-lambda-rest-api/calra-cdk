@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_s3 as s3,
     aws_lambda_python_alpha as _lambda_python)
+import hashlib
 import os
 from pathlib import Path
 from lambda_api_decorators_cdk import ast_helper
@@ -82,6 +83,8 @@ class ResourceBuilder():
         self.custom_vpcs = custom_vpcs if custom_vpcs is not None else {}
         self.dynamodb_tables = dynamodb_tables if dynamodb_tables is not None else {}
         self.s3_buckets = s3_buckets if s3_buckets is not None else {}
+        self._physical_dynamodb_tables = {}
+        self._physical_s3_buckets = {}
 
         self.custom_runtimes.update({'python3.8':lambda_.Runtime.PYTHON_3_8})
         self.custom_runtimes.update({'python3.9':lambda_.Runtime.PYTHON_3_9})
@@ -490,6 +493,119 @@ class ResourceBuilder():
                 decorators[invocation.name] = value
         return decorators
 
+    @staticmethod
+    def _physical_resource_id(resource_type: str, physical_name: str) -> str:
+        """Create a stable, collision-safe construct ID for an imported resource."""
+        digest = hashlib.sha256(physical_name.encode("utf-8")).hexdigest()[:12]
+        return f"Permission{resource_type}:{digest}"
+
+    @staticmethod
+    def _grant_arguments(invocation, physical_field: str):
+        """Read a grant invocation whose public shape was validated by the AST."""
+        if invocation.args:
+            if len(invocation.args) != 2 or invocation.kwargs:
+                raise ValueError(f"Malformed {invocation.name} invocation")
+            resource_key, access = invocation.args
+            if access not in ("read", "write"):
+                raise ValueError(f"Malformed {invocation.name} invocation")
+            return resource_key, None, access
+
+        arguments = dict(invocation.kwargs)
+        resource_key = arguments.get("resource_key")
+        physical_name = arguments.get(physical_field)
+        access = arguments.get("access")
+        if (
+            access not in ("read", "write")
+            or (resource_key is None) == (physical_name is None)
+        ):
+            raise ValueError(f"Malformed {invocation.name} invocation")
+        return resource_key, physical_name, access
+
+    def _resolve_dynamodb_table(self, construct, resource_key, table_name):
+        if resource_key is not None:
+            try:
+                return self.dynamodb_tables[resource_key]
+            except KeyError:
+                raise KeyError(
+                    f"DynamoDB table resource key {resource_key!r} is not registered"
+                ) from None
+
+        cache_key = (construct, table_name)
+        if cache_key not in self._physical_dynamodb_tables:
+            self._physical_dynamodb_tables[cache_key] = (
+                dynamodb.Table.from_table_attributes(
+                    construct,
+                    self._physical_resource_id("DynamoDBTable", table_name),
+                    table_name=table_name,
+                    grant_index_permissions=True,
+                )
+            )
+        return self._physical_dynamodb_tables[cache_key]
+
+    def _resolve_s3_bucket(self, construct, resource_key, bucket_name):
+        if resource_key is not None:
+            try:
+                return self.s3_buckets[resource_key]
+            except KeyError:
+                raise KeyError(
+                    f"S3 bucket resource key {resource_key!r} is not registered"
+                ) from None
+
+        cache_key = (construct, bucket_name)
+        if cache_key not in self._physical_s3_buckets:
+            self._physical_s3_buckets[cache_key] = s3.Bucket.from_bucket_name(
+                construct,
+                self._physical_resource_id("S3Bucket", bucket_name),
+                bucket_name,
+            )
+        return self._physical_s3_buckets[cache_key]
+
+    def _apply_dynamodb_grant(self, construct, function, invocation):
+        resource_key, table_name, access = self._grant_arguments(
+            invocation, "table_name"
+        )
+        table = self._resolve_dynamodb_table(construct, resource_key, table_name)
+        if access == "read":
+            table.grant_read_data(function)
+        else:
+            table.grant_read_write_data(function)
+
+    def _apply_s3_grant(self, construct, function, invocation):
+        resource_key, bucket_name, access = self._grant_arguments(
+            invocation, "bucket_name"
+        )
+        bucket = self._resolve_s3_bucket(construct, resource_key, bucket_name)
+        if access == "read":
+            bucket.grant_read(function)
+        else:
+            bucket.grant_read_write(function)
+
+    @staticmethod
+    def _apply_generic_permission(function, invocation):
+        if invocation.args:
+            raise ValueError("Malformed permission invocation")
+        arguments = dict(invocation.kwargs)
+        try:
+            actions = list(arguments["actions"])
+            resources = list(arguments["resources"])
+        except (KeyError, TypeError):
+            raise ValueError("Malformed permission invocation") from None
+        function.add_to_role_policy(iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=actions,
+            resources=resources,
+        ))
+
+    def _apply_permissions(self, construct, function, method):
+        """Apply each ordered permission invocation to a created function once."""
+        for invocation in method.get_decorator_invocations():
+            if invocation.name == "grant_dynamodb":
+                self._apply_dynamodb_grant(construct, function, invocation)
+            elif invocation.name == "grant_s3":
+                self._apply_s3_grant(construct, function, invocation)
+            elif invocation.name == "permission":
+                self._apply_generic_permission(function, invocation)
+
     def build_lambda_function(self, construct, method: ast_helper.Method,
                               lambda_root: Optional[Path] = None,
                               source_layout: SourceLayout = SourceLayout.ROOT):
@@ -526,6 +642,7 @@ class ResourceBuilder():
             environment= options['environment'],
             role= options['role'] 
         )
+        self._apply_permissions(construct, lambda_function, method)
         return lambda_function
 
     def _build_discovered_lambda(self, construct, method, lambda_root,
