@@ -16,7 +16,10 @@ def builder():
 
 def make_method(method="GET", path="/", decorators=None, file="handler.py",
                 directory="lambdas", handler="handle"):
-    return Method(directory, file, handler, method, decorators or {})
+    return Method(
+        directory, file, handler, method,
+        decorators if decorators is not None else {},
+    )
 
 
 def make_graph(path="/", methods=()):
@@ -24,3 +27,24 @@ def make_graph(path="/", methods=()):
     for method in methods:
         resource.add_method(method)
     return resource
+
+
+def decorator_invocations(method):
+    """Return the conceptual invocation schema without fixing its concrete type."""
+    invocations = method.get_decorator_invocations()
+
+    def field(invocation, name):
+        if isinstance(invocation, dict):
+            return invocation[name]
+        return getattr(invocation, name)
+
+    return [
+        (
+            field(invocation, "name"),
+            tuple(field(invocation, "args")),
+            tuple(field(invocation, "kwargs").items())
+            if isinstance(field(invocation, "kwargs"), dict)
+            else tuple(field(invocation, "kwargs")),
+        )
+        for invocation in invocations
+    ]

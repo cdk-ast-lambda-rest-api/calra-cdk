@@ -1,10 +1,21 @@
 import ast
 import os
+from dataclasses import dataclass
+from typing import Any, Tuple
+
+
+@dataclass(frozen=True)
+class DecoratorInvocation:
+    """A single decorator call captured without interpreting its purpose."""
+
+    name: str
+    args: Tuple[Any, ...]
+    kwargs: Tuple[Tuple[str, Any], ...]
 
 class Method:
     ALLOWED_METHODS = {'PUT', 'POST', 'GET', 'DELETE', 'ANY'}
 
-    def __init__(self, path_to_file:str, file: str, handler: str, method: str, decorators: dict):
+    def __init__(self, path_to_file:str, file: str, handler: str, method: str, decorators):
         '''One http method is always associated with a file:handler entrypoint in a one-to-one relationship and each handler has decorators in a one-to-many relationship'''
         if method not in self.ALLOWED_METHODS:
             raise ValueError(f"Invalid method: {method}. Allowed methods are {', '.join(self.ALLOWED_METHODS)}")
@@ -12,7 +23,12 @@ class Method:
         self.file = file.replace(os.sep, '/')
         self.path_to_file = path_to_file.replace(os.sep, '/')
         self.handler = handler
-        self.decorators = decorators
+        if isinstance(decorators, dict):
+            decorators = tuple(
+                DecoratorInvocation(name, (value,), ())
+                for name, value in decorators.items()
+            )
+        self._decorator_invocations = tuple(decorators)
 
     def __str__(self):
         return (self.get_method(), self.get_file(), self.get_handler())
@@ -35,8 +51,8 @@ class Method:
     def get_method(self):
         return self.method    
     
-    def get_decorators(self):
-        return self.decorators
+    def get_decorator_invocations(self):
+        return self._decorator_invocations
     
     def __eq__(self, other):
         try:
@@ -168,48 +184,122 @@ def parse_file(file_path):
         return ast.parse(source_code, filename=file_path)
 
 
+def _literal_value(node, decorator_name):
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, TypeError) as error:
+        raise ValueError(
+            f"{decorator_name} only supports literal decorator values"
+        ) from error
+
+
+def _require_non_empty_string(value, decorator_name, field):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{decorator_name} {field} must be a non-empty string")
+
+
+def _validate_grant(invocation, physical_field):
+    name = invocation.name
+    kwargs = dict(invocation.kwargs)
+    allowed_fields = {"resource_key", physical_field, "access"}
+    unexpected = next((key for key in kwargs if key not in allowed_fields), None)
+    if unexpected is not None:
+        raise ValueError(f"{name} received unexpected field {unexpected}")
+
+    if invocation.args:
+        if invocation.kwargs or len(invocation.args) != 2:
+            raise ValueError(
+                f"{name} positional form requires resource_key and access"
+            )
+        resource_key, access = invocation.args
+        _require_non_empty_string(resource_key, name, "resource_key")
+    else:
+        has_resource_key = "resource_key" in kwargs
+        has_physical_name = physical_field in kwargs
+        if has_resource_key == has_physical_name:
+            raise ValueError(
+                f"{name} requires exactly one of resource_key or {physical_field}"
+            )
+        address_field = "resource_key" if has_resource_key else physical_field
+        _require_non_empty_string(kwargs[address_field], name, address_field)
+        if "access" not in kwargs:
+            raise ValueError(f"{name} requires access")
+        access = kwargs["access"]
+
+    if access not in ("read", "write"):
+        raise ValueError(f"{name} access must be read or write, not {access!r}")
+
+
+def _validate_permission(invocation):
+    if invocation.args:
+        raise ValueError("permission only accepts keyword arguments")
+    kwargs = dict(invocation.kwargs)
+    for key in kwargs:
+        if key not in ("actions", "resources"):
+            raise ValueError(f"permission received unexpected field {key}")
+    for field in ("actions", "resources"):
+        if field not in kwargs:
+            raise ValueError(f"permission requires {field}")
+        values = kwargs[field]
+        if not isinstance(values, (list, tuple)) or not values:
+            raise ValueError(f"permission {field} must be a non-empty sequence")
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError(
+                f"permission {field} must contain only non-empty strings"
+            )
+
+    normalized = tuple(
+        (key, tuple(value) if key in ("actions", "resources") else value)
+        for key, value in invocation.kwargs
+    )
+    return DecoratorInvocation(invocation.name, invocation.args, normalized)
+
+
+def _parse_invocation(decorator):
+    if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Name):
+        return None
+    name = decorator.func.id
+    if any(keyword.arg is None for keyword in decorator.keywords):
+        raise ValueError(f"{name} does not support expanded keyword arguments")
+    invocation = DecoratorInvocation(
+        name=name,
+        args=tuple(_literal_value(arg, name) for arg in decorator.args),
+        kwargs=tuple(
+            (keyword.arg, _literal_value(keyword.value, name))
+            for keyword in decorator.keywords
+        ),
+    )
+    if name == "grant_dynamodb":
+        _validate_grant(invocation, "table_name")
+    elif name == "grant_s3":
+        _validate_grant(invocation, "bucket_name")
+    elif name == "permission":
+        invocation = _validate_permission(invocation)
+    return invocation
+
+
 def get_file_nodes(parsed_tree, id, directory):
     node_list = []
     for node in parsed_tree.body:
         if isinstance(node, ast.FunctionDef):
             is_lambda_http = False
-            method_decorators = {}
+            decorator_invocations = []
             func_name = node.name
             paths = [] #A handler could have multiple paths with multiple HTTP methods
             for decorator in node.decorator_list:
-                if isinstance(decorator, ast.Call):
-                    http_decorator = False
-                    # Handle decorators with arguments
-                    decorator_name = ast.unparse(decorator.func).strip()
-                    # An HTTP request will always have an endpoint
-                    if decorator_name in Method.ALLOWED_METHODS:
-                        http_decorator = True
-                        is_lambda_http = True
-                        #First argument should be path
-                        path = decorator.args[0].value
-                        if http_decorator:
-                            paths.append((path, decorator_name))
-                    else:
-                        if len(decorator.args) > 1:
-                            value = [arg.value for arg in decorator.args]
-                        else:
-                            if isinstance(decorator.args[0], ast.List):
-                                value = [elt.value for elt in decorator.args[0].elts]
-                            else:
-                                value = decorator.args[0].value
-                        if decorator_name in method_decorators:
-                            current = method_decorators[decorator_name]
-                            if not isinstance(current, list):
-                                current = [current]
-                                method_decorators[decorator_name] = current
-                            current.extend(value if isinstance(value, list) else [value])
-                        else:
-                            method_decorators[decorator_name] = value
-                else:
-                    # Handle decorators without arguments
-                    decorator_name = ast.unparse(decorator).strip()
-                    # Aggregate metadata from all decorators
-                    method_decorators.setdefault(decorator_name, [])
+                invocation = _parse_invocation(decorator)
+                if invocation is None:
+                    continue
+                decorator_invocations.append(invocation)
+                if invocation.name in Method.ALLOWED_METHODS:
+                    if len(invocation.args) != 1 or invocation.kwargs:
+                        raise ValueError(
+                            f"{invocation.name} requires one positional path"
+                        )
+                    path = invocation.args[0]
+                    _require_non_empty_string(path, invocation.name, "path")
+                    is_lambda_http = True
+                    paths.append((path, invocation.name))
 
             #ast.FunctionDef ends. If the Function had an HTTP Decorator it means it's a lambda function
             if is_lambda_http: 
@@ -219,7 +309,7 @@ def get_file_nodes(parsed_tree, id, directory):
                     #Concatenate directory to id (file) for lambda entry point /  separate "index" file from path
                     full_path = os.path.join(directory,id)
                     
-                    method = Method(path_to_file=full_path[:full_path.rindex(os.sep)], file= filepath, handler=func_name, method=value, decorators=method_decorators)
+                    method = Method(path_to_file=full_path[:full_path.rindex(os.sep)], file= filepath, handler=func_name, method=value, decorators=decorator_invocations)
                     node_exists = False
                     if len(node_list) > 0:
                         for node in node_list:

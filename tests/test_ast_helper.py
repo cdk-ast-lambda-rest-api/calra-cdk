@@ -2,6 +2,7 @@ import ast
 
 import pytest
 
+from conftest import decorator_invocations
 from lambda_api_decorators_cdk.ast_helper import get_file_nodes, get_lambda_graph
 
 
@@ -46,7 +47,7 @@ def test_discovers_each_supported_http_decorator(verb):
     assert (resources[0].get_path(), method.get_method()) == ("/route", verb)
 
 
-def test_parses_supported_decorator_argument_forms_and_repetitions():
+def test_preserves_supported_decorator_invocations_without_flattening():
     tree = ast.parse('''
 @GET("/")
 @runtime("python3.12")
@@ -64,12 +65,20 @@ def handle(event, context):
     pass
 ''')
     method = get_file_nodes(tree, "handler.py", "lambdas")[0].get_methods()[0]
-    assert method.get_decorators() == {
-        "runtime": "python3.12", "timeout": 30, "memory_size": 512,
-        "role": "worker", "vpc": "private", "layer": ["base", "data", "extra"],
-        "security_group": ["one", "two"], "environment": ["A", "B"],
-        "name": "named", "description": "described",
-    }
+    assert decorator_invocations(method) == [
+        ("GET", ("/",), ()),
+        ("runtime", ("python3.12",), ()),
+        ("timeout", (30,), ()),
+        ("memory_size", (512,), ()),
+        ("role", ("worker",), ()),
+        ("vpc", ("private",), ()),
+        ("layer", (["base", "data"],), ()),
+        ("layer", ("extra",), ()),
+        ("security_group", ("one", "two"), ()),
+        ("environment", ("A", "B"), ()),
+        ("name", ("named",), ()),
+        ("description", ("described",), ()),
+    ]
 
 
 def test_multiple_http_decorators_create_multiple_method_records_for_handler():
@@ -83,6 +92,8 @@ def handle(event, context): pass
         ("GET", "handle", "handlerdotpy-handle"),
         ("POST", "handle", "handlerdotpy-handle"),
     ]
+    expected = [("GET", ("/items",), ()), ("POST", ("/items",), ())]
+    assert [decorator_invocations(method) for method in methods] == [expected, expected]
 
 
 def test_decorated_non_http_and_plain_files_create_no_routes(tmp_path, capsys):
@@ -114,5 +125,9 @@ def test_ast_constant_s_characterization_for_strings_numbers_and_lists():
 @layer(["one", "two"])
 def handler(e, c): pass
 '''), "source.py", "root")[0].get_methods()[0]
-    assert method.get_decorators() == {"description": "text", "timeout": 3,
-                                        "layer": ["one", "two"]}
+    assert decorator_invocations(method) == [
+        ("GET", ("/strings",), ()),
+        ("description", ("text",), ()),
+        ("timeout", (3,), ()),
+        ("layer", (["one", "two"],), ()),
+    ]
