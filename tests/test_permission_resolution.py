@@ -84,6 +84,18 @@ def flattened_resources(stack):
     return str([statement.get("Resource") for statement in policy_statements(stack)])
 
 
+def has_resolved_resource(stack, resource_arn):
+    """Match a CDK ARN token against its synthesized CloudFormation value."""
+    expected = stack.resolve(resource_arn)
+    for statement in policy_statements(stack):
+        resources = statement.get("Resource", [])
+        if not isinstance(resources, list):
+            resources = [resources]
+        if expected in resources:
+            return True
+    return False
+
+
 @pytest.fixture
 def stack():
     return Stack(App(), "Stack")
@@ -118,7 +130,7 @@ def test_dynamodb_logical_key_resolves_registered_resource(
     builder = ResourceBuilder(dynamodb_tables={"orders": table})
     builder.build_lambda_function(stack, permission_method(form))
     assert "dynamodb:GetItem" in actions(stack)
-    assert table.table_arn in flattened_resources(stack)
+    assert has_resolved_resource(stack, table.table_arn)
 
 
 def test_missing_dynamodb_logical_key_fails_with_decorator_context(stack, inline_lambdas):
@@ -182,8 +194,8 @@ def test_s3_logical_key_resolves_registered_resource(
     ResourceBuilder(s3_buckets={"documents": bucket}).build_lambda_function(
         stack, permission_method(form)
     )
-    assert "s3:GetObject" in actions(stack)
-    assert bucket.bucket_arn in flattened_resources(stack)
+    assert {"s3:GetObject*", "s3:GetBucket*", "s3:List*"} <= actions(stack)
+    assert has_resolved_resource(stack, bucket.bucket_arn)
 
 
 def test_missing_s3_logical_key_fails_with_decorator_context(stack, inline_lambdas):
@@ -194,8 +206,11 @@ def test_missing_s3_logical_key_fails_with_decorator_context(stack, inline_lambd
 
 
 @pytest.mark.parametrize("access,required", [
-    ("read", {"s3:GetObject", "s3:ListBucket"}),
-    ("write", {"s3:GetObject", "s3:PutObject", "s3:DeleteObject"}),
+    ("read", {"s3:GetObject*", "s3:GetBucket*", "s3:List*"}),
+    ("write", {
+        "s3:GetObject*", "s3:GetBucket*", "s3:List*",
+        "s3:DeleteObject*", "s3:PutObject",
+    }),
 ])
 def test_s3_access_maps_to_native_read_or_read_write_grant(
     stack, inline_lambdas, bucket, access, required
@@ -214,7 +229,7 @@ def test_s3_physical_name_resolves_and_grants_bucket(stack, inline_lambdas):
         ),
     )
     assert "documents-production" in flattened_resources(stack)
-    assert {"s3:GetObject", "s3:ListBucket"} <= actions(stack)
+    assert {"s3:GetObject*", "s3:GetBucket*", "s3:List*"} <= actions(stack)
 
 
 def test_s3_physical_resource_is_reused_without_construct_collision(stack, inline_lambdas):
@@ -338,4 +353,4 @@ def test_lambda_api_high_level_config_applies_registered_grants(
     )
 
     assert "dynamodb:GetItem" in actions(stack)
-    assert table.table_arn in flattened_resources(stack)
+    assert has_resolved_resource(stack, table.table_arn)
