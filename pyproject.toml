@@ -9,7 +9,7 @@
 # https://packaging.python.org/en/latest/tutorials/packaging-projects/#choosing-a-build-backend
 [build-system]
 # A list of packages that are needed to build your package:
-requires = ["setuptools"]  # REQUIRED if [build-system] table is used
+requires = ["setuptools", "setuptools-scm>=8"]  # REQUIRED if [build-system] table is used
 # The name of the Python object that frontends will use to perform the build:
 build-backend = "setuptools.build_meta"  # If not defined, then legacy behavior can happen.
 
@@ -18,7 +18,7 @@ build-backend = "setuptools.build_meta"  # If not defined, then legacy behavior 
 # https://packaging.python.org/specifications/core-metadata/#name
 name = "lambda-api-decorators-cdk"
 # https://packaging.python.org/guides/single-sourcing-package-version/
-version = "0.2.2"
+dynamic = ["version"]
 
 # https://packaging.python.org/specifications/core-metadata/#summary
 description = "AWS CDK integration for Lambda API Decorators. Generate AWS Lambda and API Gateway infrastructure from decorated Python handlers."
@@ -96,6 +96,9 @@ dependencies = [
 # This is configuration specific to the `setuptools` build backend.
 # If you are using a different build backend, you will need to change this.
 [tool.setuptools]
+
+[tool.setuptools_scm]
+tag_regex = '^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
