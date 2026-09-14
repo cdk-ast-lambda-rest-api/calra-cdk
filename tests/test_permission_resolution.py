@@ -14,7 +14,12 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_s3 as s3
 
-from lambda_api_decorators_cdk import LambdaApi, LambdaApiConfig, ResourceBuilder
+from lambda_api_decorators_cdk import (
+    ApiType,
+    LambdaApi,
+    LambdaApiConfig,
+    ResourceBuilder,
+)
 from lambda_api_decorators_cdk import ast_helper
 from lambda_api_decorators_cdk import resource_builder as builder_module
 
@@ -184,6 +189,25 @@ def test_dynamodb_physical_resource_is_reused_without_construct_collision(
     assert flattened_resources(stack).count("table/orders-production") >= 2
 
 
+def test_independent_builders_reuse_physical_dynamodb_table_under_same_scope(
+    stack, inline_lambdas
+):
+    for builder, file, handler in (
+        (ResourceBuilder(), "first.py", "first"),
+        (ResourceBuilder(), "second.py", "second"),
+    ):
+        builder.build_lambda_function(
+            stack,
+            permission_method(
+                'grant_dynamodb(table_name="orders-production", access="read")',
+                file=file,
+                handler=handler,
+            ),
+        )
+
+    assert flattened_resources(stack).count("table/orders-production") >= 2
+
+
 @pytest.mark.parametrize("form", [
     'grant_s3("documents", "read")',
     'grant_s3(resource_key="documents", access="read")',
@@ -245,6 +269,46 @@ def test_s3_physical_resource_is_reused_without_construct_collision(stack, inlin
         )
     assert len(synthesized(stack)["Resources"]) >= 4
     assert flattened_resources(stack).count("documents-production") >= 2
+
+
+def test_independent_builders_reuse_physical_s3_bucket_under_same_scope(
+    stack, inline_lambdas
+):
+    for builder, file, handler in (
+        (ResourceBuilder(), "first.py", "first"),
+        (ResourceBuilder(), "second.py", "second"),
+    ):
+        builder.build_lambda_function(
+            stack,
+            permission_method(
+                'grant_s3(bucket_name="documents-production", access="read")',
+                file=file,
+                handler=handler,
+            ),
+        )
+
+    assert flattened_resources(stack).count("documents-production") >= 2
+
+
+@pytest.mark.parametrize("service", ["dynamodb", "s3"])
+def test_physical_imports_remain_owned_by_each_stack(service, inline_lambdas):
+    app = App()
+    stacks = [Stack(app, "FirstStack"), Stack(app, "SecondStack")]
+    if service == "dynamodb":
+        decorator = 'grant_dynamodb(table_name="shared-production", access="read")'
+        resource_fragment = "table/shared-production"
+    else:
+        decorator = 'grant_s3(bucket_name="shared-production", access="read")'
+        resource_fragment = "shared-production"
+
+    for current_stack in stacks:
+        ResourceBuilder().build_lambda_function(
+            current_stack,
+            permission_method(decorator),
+        )
+
+    for current_stack in stacks:
+        assert resource_fragment in flattened_resources(current_stack)
 
 
 def test_generic_permission_adds_iam_statement_to_function_role(stack, inline_lambdas):
@@ -317,6 +381,70 @@ def test_permissions_attach_to_the_role_selected_for_the_lambda_lifecycle(
         assert function.role is not None
 
 
+def test_generic_permission_fails_clearly_for_immutable_imported_role(
+    stack, inline_lambdas
+):
+    imported_role = iam.Role.from_role_arn(
+        stack,
+        "ImportedRole",
+        "arn:aws:iam::123456789012:role/external-lambda-role",
+        mutable=False,
+    )
+    builder = ResourceBuilder(default_role=imported_role)
+
+    with pytest.raises(
+        (RuntimeError, ValueError),
+        match=r"(?i)(permission|grant|policy).*(role|mutable)|(role|mutable).*(permission|grant|policy)",
+    ):
+        builder.build_lambda_function(
+            stack,
+            permission_method(
+                'permission(actions=["events:PutEvents"], resources=["arn:events"])'
+            ),
+        )
+
+
+def test_semantic_grant_fails_clearly_for_immutable_imported_role(
+    stack, inline_lambdas, table
+):
+    imported_role = iam.Role.from_role_arn(
+        stack,
+        "ImportedRole",
+        "arn:aws:iam::123456789012:role/external-lambda-role",
+        mutable=False,
+    )
+    builder = ResourceBuilder(
+        default_role=imported_role,
+        dynamodb_tables={"orders": table},
+    )
+
+    with pytest.raises(
+        (RuntimeError, ValueError),
+        match=r"(?i)(permission|grant|policy).*(role|mutable)|(role|mutable).*(permission|grant|policy)",
+    ):
+        builder.build_lambda_function(
+            stack,
+            permission_method('grant_dynamodb("orders", "read")'),
+        )
+
+
+def test_immutable_imported_role_without_permissions_remains_supported(
+    stack, inline_lambdas
+):
+    imported_role = iam.Role.from_role_arn(
+        stack,
+        "ImportedRole",
+        "arn:aws:iam::123456789012:role/external-lambda-role",
+        mutable=False,
+    )
+
+    function = ResourceBuilder(default_role=imported_role).build_lambda_function(
+        stack, permission_method()
+    )
+
+    assert function.role.role_arn == imported_role.role_arn
+
+
 def test_permissions_are_applied_after_function_creation_and_exactly_once(monkeypatch):
     events = []
 
@@ -349,6 +477,26 @@ def test_lambda_api_high_level_config_applies_registered_grants(
         stack,
         "Api",
         lambda_path="lambdas",
+        config=LambdaApiConfig(dynamodb_tables={"orders": table}),
+    )
+
+    assert "dynamodb:GetItem" in actions(stack)
+    assert has_resolved_resource(stack, table.table_arn)
+
+
+def test_lambda_api_http_config_applies_registered_grants(
+    stack, monkeypatch, table
+):
+    install_inline_lambda(monkeypatch)
+    graph = ast_helper.Resource("/")
+    graph.add_method(permission_method('grant_dynamodb("orders", "read")'))
+    monkeypatch.setattr(ast_helper, "get_lambda_graph", lambda _path: graph)
+
+    LambdaApi(
+        stack,
+        "Api",
+        lambda_path="lambdas",
+        api_type=ApiType.HTTP,
         config=LambdaApiConfig(dynamodb_tables={"orders": table}),
     )
 

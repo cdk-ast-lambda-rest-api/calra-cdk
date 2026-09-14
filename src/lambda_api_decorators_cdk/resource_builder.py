@@ -500,6 +500,23 @@ class ResourceBuilder():
         return f"Permission{resource_type}:{digest}"
 
     @staticmethod
+    def _find_imported_resource(construct, construct_id, resource_type,
+                                name_attribute, physical_name):
+        """Find a compatible physical import already owned by this scope."""
+        resource = construct.node.try_find_child(construct_id)
+        if resource is None:
+            return None
+        if (
+            not isinstance(resource, resource_type)
+            or getattr(resource, name_attribute, None) != physical_name
+        ):
+            raise RuntimeError(
+                f"Construct {construct_id!r} already exists but is not the "
+                f"expected imported resource {physical_name!r}"
+            )
+        return resource
+
+    @staticmethod
     def _grant_arguments(invocation, physical_field: str):
         """Read a grant invocation whose public shape was validated by the AST."""
         if invocation.args:
@@ -532,14 +549,23 @@ class ResourceBuilder():
 
         cache_key = (construct, table_name)
         if cache_key not in self._physical_dynamodb_tables:
-            self._physical_dynamodb_tables[cache_key] = (
-                dynamodb.Table.from_table_attributes(
+            construct_id = self._physical_resource_id(
+                "DynamoDBTable", table_name)
+            table = self._find_imported_resource(
+                construct,
+                construct_id,
+                dynamodb.TableBase,
+                "table_name",
+                table_name,
+            )
+            if table is None:
+                table = dynamodb.Table.from_table_attributes(
                     construct,
-                    self._physical_resource_id("DynamoDBTable", table_name),
+                    construct_id,
                     table_name=table_name,
                     grant_index_permissions=True,
                 )
-            )
+            self._physical_dynamodb_tables[cache_key] = table
         return self._physical_dynamodb_tables[cache_key]
 
     def _resolve_s3_bucket(self, construct, resource_key, bucket_name):
@@ -553,12 +579,52 @@ class ResourceBuilder():
 
         cache_key = (construct, bucket_name)
         if cache_key not in self._physical_s3_buckets:
-            self._physical_s3_buckets[cache_key] = s3.Bucket.from_bucket_name(
+            construct_id = self._physical_resource_id("S3Bucket", bucket_name)
+            bucket = self._find_imported_resource(
                 construct,
-                self._physical_resource_id("S3Bucket", bucket_name),
+                construct_id,
+                s3.BucketBase,
+                "bucket_name",
                 bucket_name,
             )
+            if bucket is None:
+                bucket = s3.Bucket.from_bucket_name(
+                    construct, construct_id, bucket_name)
+            self._physical_s3_buckets[cache_key] = bucket
         return self._physical_s3_buckets[cache_key]
+
+    @staticmethod
+    def _ensure_permission_applied(applied, permission_kind):
+        if not applied:
+            raise RuntimeError(
+                f"{permission_kind} permission could not be applied because "
+                "the selected execution role cannot accept policy mutations"
+            )
+
+    @classmethod
+    def _ensure_role_policy_applied(cls, function, statement,
+                                    permission_kind):
+        result = function.role.add_to_principal_policy(statement)
+        cls._ensure_permission_applied(
+            result.statement_added and any(
+                isinstance(child, iam.Policy)
+                for child in function.role.node.children
+            ),
+            permission_kind,
+        )
+
+    @classmethod
+    def _ensure_grant_applied(cls, function, grant, permission_kind):
+        # Narrow test doubles used by existing callers may not model CDK Grant.
+        if grant is None:
+            return
+        cls._ensure_permission_applied(
+            grant.success and any(
+                isinstance(child, iam.Policy)
+                for child in function.role.node.children
+            ),
+            permission_kind,
+        )
 
     def _apply_dynamodb_grant(self, construct, function, invocation):
         resource_key, table_name, access = self._grant_arguments(
@@ -566,9 +632,10 @@ class ResourceBuilder():
         )
         table = self._resolve_dynamodb_table(construct, resource_key, table_name)
         if access == "read":
-            table.grant_read_data(function)
+            grant = table.grant_read_data(function)
         else:
-            table.grant_read_write_data(function)
+            grant = table.grant_read_write_data(function)
+        self._ensure_grant_applied(function, grant, invocation.name)
 
     def _apply_s3_grant(self, construct, function, invocation):
         resource_key, bucket_name, access = self._grant_arguments(
@@ -576,9 +643,10 @@ class ResourceBuilder():
         )
         bucket = self._resolve_s3_bucket(construct, resource_key, bucket_name)
         if access == "read":
-            bucket.grant_read(function)
+            grant = bucket.grant_read(function)
         else:
-            bucket.grant_read_write(function)
+            grant = bucket.grant_read_write(function)
+        self._ensure_grant_applied(function, grant, invocation.name)
 
     @staticmethod
     def _apply_generic_permission(function, invocation):
@@ -590,11 +658,13 @@ class ResourceBuilder():
             resources = list(arguments["resources"])
         except (KeyError, TypeError):
             raise ValueError("Malformed permission invocation") from None
-        function.add_to_role_policy(iam.PolicyStatement(
+        statement = iam.PolicyStatement(
             effect=iam.Effect.ALLOW,
             actions=actions,
             resources=resources,
-        ))
+        )
+        ResourceBuilder._ensure_role_policy_applied(
+            function, statement, invocation.name)
 
     def _apply_permissions(self, construct, function, method):
         """Apply each ordered permission invocation to a created function once."""
