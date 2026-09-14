@@ -11,7 +11,8 @@ def test_constructor_contract_and_empty_snapshot():
     parameters = inspect.signature(LambdaApiConfig).parameters
     assert list(parameters) == [
         "runtime", "timeout", "memory_size", "vpc", "vpc_subnets", "role",
-        "layers", "security_groups", "environment",
+        "layers", "security_groups", "environment", "dynamodb_tables",
+        "s3_buckets",
     ]
     assert all(value.kind is inspect.Parameter.KEYWORD_ONLY
                for value in parameters.values())
