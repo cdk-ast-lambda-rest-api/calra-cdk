@@ -344,7 +344,7 @@ class ResourceBuilder():
         explicit_layer_keys = set(self.custom_layers)
         required_runtimes = {}
         for method in self._iter_methods(graph):
-            decorators = method.get_decorators()
+            decorators = self._configuration_decorators(method)
             runtime = self._resolve_runtime(decorators)
 
             for common_layer in self.common_layers:
@@ -461,6 +461,27 @@ class ResourceBuilder():
                 options[key] = self.get_custom_vpc(value)
         return options
 
+    @staticmethod
+    def _configuration_decorators(method: ast_helper.Method) -> dict:
+        """Interpret ordered AST metadata using the established option semantics."""
+        decorators = {}
+        ignored = ast_helper.Method.ALLOWED_METHODS | {
+            'grant_dynamodb', 'grant_s3', 'permission'}
+        for invocation in method.get_decorator_invocations():
+            if invocation.name in ignored or not invocation.args:
+                continue
+            value = (invocation.args[0] if len(invocation.args) == 1
+                     else list(invocation.args))
+            if invocation.name in decorators:
+                current = decorators[invocation.name]
+                if not isinstance(current, list):
+                    current = [current]
+                    decorators[invocation.name] = current
+                current.extend(value if isinstance(value, list) else [value])
+            else:
+                decorators[invocation.name] = value
+        return decorators
+
     def build_lambda_function(self, construct, method: ast_helper.Method,
                               lambda_root: Optional[Path] = None,
                               source_layout: SourceLayout = SourceLayout.ROOT):
@@ -475,7 +496,7 @@ class ResourceBuilder():
             entry_path, file = self._resolve_source(
                 method, lambda_root, source_layout)
             entry_path = str(entry_path)
-        options = self.get_options(method.get_decorators())
+        options = self.get_options(self._configuration_decorators(method))
         vpc_options = options['vpc']
         vpc = vpc_options[0] if vpc_options is not None else None
         vpc_subnets = vpc_options[1] if vpc_options is not None else None

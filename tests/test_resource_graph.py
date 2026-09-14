@@ -1,15 +1,15 @@
-from conftest import make_method
+from conftest import decorator_invocations, make_method
 from lambda_api_decorators_cdk.ast_helper import Method, Resource
 
 
 def test_method_accessors_and_logical_id():
-    method = make_method(file="nested/handler.py", handler="run", decorators={"x": 1})
+    method = make_method(file="nested/handler.py", handler="run", decorators=[])
     assert method.get_logical_id() == "nested-handlerdotpy-run"
     assert method.get_file() == "nested/handler.py"
     assert method.get_path_to_file() == "lambdas"
     assert method.get_handler() == "run"
     assert method.get_method() == "GET"
-    assert method.get_decorators() == {"x": 1}
+    assert decorator_invocations(method) == []
 
 
 def test_method_equality_currently_returns_false_for_equivalent_methods():
