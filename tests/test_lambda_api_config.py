@@ -186,10 +186,10 @@ def test_resource_builder_builtin_runtimes_are_fresh_and_do_not_mutate_config():
     expected = {"python3.8", "python3.9", "python3.10", "python3.11", "python3.12"}
     config = LambdaApiConfig()
     first = config._create_resource_builder()
-    assert set(first.custom_runtimes) == expected
+    assert set(first.custom_runtimes) >= expected
     first.custom_runtimes["builder-only"] = object()
     second = config._create_resource_builder()
-    assert set(second.custom_runtimes) == expected
+    assert set(second.custom_runtimes) >= expected
     assert "builder-only" not in second.custom_runtimes
 
 

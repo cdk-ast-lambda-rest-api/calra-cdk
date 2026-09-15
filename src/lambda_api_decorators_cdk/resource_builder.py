@@ -50,7 +50,7 @@ class ResourceBuilder():
                 ) -> 'ResourceBuilder':
     
         '''
-        Creates base instance of a Resource Builder. By default, there are no predetermined custom, common nor default settings with the exception of the following custom runtimes: python3.8, python3.9, python.10, python.11, python.12.
+        Creates base instance of a Resource Builder. By default, there are no predetermined custom, common nor default settings with the exception of the following custom runtimes: python3.8, python3.9, python3.10, python3.11, python3.12, python3.13, python3.14.
         You can optionally specify arguments (Keep in mind some of them are constructs of the aws_cdk toolkit) such as:
         @param default_runtime
         @param default_timeout
@@ -98,6 +98,8 @@ class ResourceBuilder():
         self.custom_runtimes.update({'python3.10':lambda_.Runtime.PYTHON_3_10})
         self.custom_runtimes.update({'python3.11':lambda_.Runtime.PYTHON_3_11})
         self.custom_runtimes.update({'python3.12':lambda_.Runtime.PYTHON_3_12})
+        self.custom_runtimes.update({'python3.13':lambda_.Runtime.PYTHON_3_13})
+        self.custom_runtimes.update({'python3.14':lambda_.Runtime.PYTHON_3_14})
 
 
     #Setters
