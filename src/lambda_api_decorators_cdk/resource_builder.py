@@ -8,13 +8,16 @@ from aws_cdk import (
     aws_apigatewayv2_integrations as integrations,
     aws_lambda as lambda_,
     aws_s3 as s3,
-    aws_lambda_python_alpha as _lambda_python)
+    aws_lambda_python_alpha as _lambda_python,
+    Annotations)
 import hashlib
+import inspect
 import os
 from pathlib import Path
 from lambda_api_decorators_cdk import ast_helper
 from lambda_api_decorators_cdk.source_layout import SourceLayout
 from typing import Optional, List, Dict
+from constructs import Construct
 
 class ResourceBuilder():
     '''
@@ -42,6 +45,8 @@ class ResourceBuilder():
                 custom_vpcs = None, ####TODO
                 dynamodb_tables: Optional[Dict[str, dynamodb.ITable]] = None,
                 s3_buckets: Optional[Dict[str, s3.IBucket]] = None,
+                authorizers: Optional[Dict[str, object]] = None,
+                default_authorizer: Optional[str] = None,
                 ) -> 'ResourceBuilder':
     
         '''
@@ -83,6 +88,8 @@ class ResourceBuilder():
         self.custom_vpcs = custom_vpcs if custom_vpcs is not None else {}
         self.dynamodb_tables = dynamodb_tables if dynamodb_tables is not None else {}
         self.s3_buckets = s3_buckets if s3_buckets is not None else {}
+        self.authorizers = authorizers if authorizers is not None else {}
+        self.default_authorizer = default_authorizer
         self._physical_dynamodb_tables = {}
         self._physical_s3_buckets = {}
 
@@ -236,6 +243,7 @@ class ResourceBuilder():
         if print_tree:
             ast_helper.dump_tree(graph)
         self._prepare_layers(construct, graph, layer_sources)
+        self._emit_authorization_diagnostics(construct, graph)
         self.build_from_graph(
             construct, graph, api_resource, lambda_root, source_layout)
 
@@ -257,6 +265,7 @@ class ResourceBuilder():
         if print_tree:
             ast_helper.dump_tree(graph)
         self._prepare_layers(construct, graph, layer_sources)
+        self._emit_authorization_diagnostics(construct, graph)
         self.build_http_from_graph(
             construct, graph, http_api, lambda_root, source_layout)
 
@@ -492,6 +501,114 @@ class ResourceBuilder():
             else:
                 decorators[invocation.name] = value
         return decorators
+
+    @staticmethod
+    def _auth_override(method: ast_helper.Method):
+        """Return inherit, public, or an explicit logical authorizer key."""
+        for invocation in method.get_decorator_invocations():
+            if invocation.name == "public":
+                return ("public", None)
+            if invocation.name == "authorizer":
+                return ("authorizer", invocation.args[0])
+        return ("inherit", None)
+
+    def _effective_authorizer_key(self, method: ast_helper.Method):
+        state, key = self._auth_override(method)
+        if state == "public":
+            return None
+        return key if state == "authorizer" else self.default_authorizer
+
+    @staticmethod
+    def _implements_interface(authorizer, interface) -> bool:
+        return interface in getattr(authorizer, "__jsii_ifaces__", ())
+
+    def _resolve_authorizer(self, method: ast_helper.Method, family: str):
+        key = self._effective_authorizer_key(method)
+        if key is None:
+            return None
+        try:
+            authorizer = self.authorizers[key]
+        except KeyError:
+            raise KeyError(f"Authorizer key {key!r} is not registered") from None
+        interface = (
+            apigateway.IAuthorizer
+            if family == "REST"
+            else apigateway2.IHttpRouteAuthorizer
+        )
+        if not self._implements_interface(authorizer, interface):
+            raise TypeError(
+                f"Authorizer key {key!r} is not compatible with {family} APIs"
+            )
+        return authorizer
+
+    def _rest_method_options(self, method: ast_helper.Method):
+        authorizer = self._resolve_authorizer(method, "REST")
+        if authorizer is None:
+            return {
+                "authorizer": None,
+                "authorization_type": apigateway.AuthorizationType.NONE,
+            }
+        return {
+            "authorizer": authorizer,
+            "authorization_type": authorizer.authorization_type,
+        }
+
+    def _add_rest_method(self, resource, method, integration):
+        options = self._rest_method_options(method)
+        parameters = inspect.signature(resource.add_method).parameters.values()
+        accepts_options = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            or parameter.name == "authorization_type"
+            for parameter in parameters
+        )
+        if accepts_options:
+            return resource.add_method(method.get_method(), integration, **options)
+        # Preserve compatibility with narrow direct-builder test doubles and
+        # existing callers that expose only the historical two-argument shape.
+        return resource.add_method(method.get_method(), integration)
+
+    def _http_route_authorizer(self, method: ast_helper.Method):
+        authorizer = self._resolve_authorizer(method, "HTTP")
+        return authorizer if authorizer is not None else apigateway2.HttpNoneAuthorizer()
+
+    def _emit_authorization_diagnostics(self, construct, graph):
+        if not isinstance(construct, Construct):
+            return
+        if self.default_authorizer is None:
+            Annotations.of(construct).add_warning_v2(
+                "LAD_AUTH_PUBLIC_DEFAULT",
+                "LAD_AUTH_PUBLIC_DEFAULT: Routes without explicit authorization are public because no "
+                "default authorizer is configured.",
+            )
+
+        deviations = []
+
+        def visit(resource):
+            for method in resource.get_methods():
+                state, key = self._auth_override(method)
+                if self.default_authorizer is None:
+                    if state == "authorizer":
+                        deviations.append((resource.get_path(), method.get_method(), key))
+                elif state == "public":
+                    deviations.append((resource.get_path(), method.get_method(), "PUBLIC"))
+                elif state == "authorizer" and key != self.default_authorizer:
+                    deviations.append((resource.get_path(), method.get_method(), key))
+            for child in resource.get_connections():
+                visit(child)
+
+        visit(graph)
+        if not deviations:
+            return
+        deviations.sort(key=lambda item: (item[0], item[1]))
+        if self.default_authorizer is None:
+            heading = "Default authorizer: PUBLIC\n\nProtected routes:"
+        else:
+            heading = f"Default authorizer: {self.default_authorizer}\n\nOverrides:"
+        details = "\n".join(
+            f"    {method} {path}    {value}"
+            for path, method, value in deviations
+        )
+        Annotations.of(construct).add_info(f"{heading}\n{details}")
 
     @staticmethod
     def _physical_resource_id(resource_type: str, physical_name: str) -> str:
@@ -734,7 +851,8 @@ class ResourceBuilder():
             for method in graph.get_methods():
                 lbda = self._build_discovered_lambda(
                     construct, method, lambda_root, source_layout)
-                new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
+                self._add_rest_method(
+                    new_resource, method, apigateway.LambdaIntegration(lbda))
         else:
             #We can get a skip from /something to /something/one/two/method, so resources with no methods "one" and "two" should be created
             new_api_resources = path[len(api_resource.path):].lstrip('/').split('/')
@@ -746,7 +864,8 @@ class ResourceBuilder():
             for method in graph.get_methods():
                 lbda = self._build_discovered_lambda(
                     construct, method, lambda_root, source_layout)
-                new_resource.add_method(method.get_method(), apigateway.LambdaIntegration(lbda))
+                self._add_rest_method(
+                    new_resource, method, apigateway.LambdaIntegration(lbda))
 
         for node in graph.get_connections():
             self.build_from_graph(
@@ -776,7 +895,8 @@ class ResourceBuilder():
                 http_api.add_routes(
                     path='/',
                     methods=[method_mapping[method.get_method()]],
-                    integration= api_lbda_integration
+                    integration=api_lbda_integration,
+                    authorizer=self._http_route_authorizer(method),
                 )
         else:
             for method in graph.get_methods():
@@ -786,7 +906,8 @@ class ResourceBuilder():
                 http_api.add_routes(
                     path=path,
                     methods=[method_mapping[method.get_method()]],
-                    integration= api_lbda_integration
+                    integration=api_lbda_integration,
+                    authorizer=self._http_route_authorizer(method),
                 )
 
         for node in graph.get_connections():
