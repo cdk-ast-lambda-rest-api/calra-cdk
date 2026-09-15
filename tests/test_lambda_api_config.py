@@ -12,7 +12,7 @@ def test_constructor_contract_and_empty_snapshot():
     assert list(parameters) == [
         "runtime", "timeout", "memory_size", "vpc", "vpc_subnets", "role",
         "layers", "security_groups", "environment", "dynamodb_tables",
-        "s3_buckets",
+        "s3_buckets", "authorizers", "default_authorizer",
     ]
     assert all(value.kind is inspect.Parameter.KEYWORD_ONLY
                for value in parameters.values())
@@ -29,6 +29,8 @@ def test_constructor_contract_and_empty_snapshot():
     assert builder.custom_environments == {}
     assert builder.custom_security_groups == {}
     assert builder.custom_vpcs == {}
+    assert builder.authorizers == {}
+    assert builder.default_authorizer is None
 
 
 def test_constructor_maps_defaults_common_values_and_preserves_object_identity():

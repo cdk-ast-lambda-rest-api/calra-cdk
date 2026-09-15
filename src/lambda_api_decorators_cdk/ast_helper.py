@@ -256,6 +256,8 @@ def _validate_permission(invocation):
 
 
 def _parse_invocation(decorator):
+    if isinstance(decorator, ast.Name) and decorator.id == "public":
+        return DecoratorInvocation(name="public", args=(), kwargs=())
     if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Name):
         return None
     name = decorator.func.id
@@ -275,6 +277,12 @@ def _parse_invocation(decorator):
         _validate_grant(invocation, "bucket_name")
     elif name == "permission":
         invocation = _validate_permission(invocation)
+    elif name == "authorizer":
+        if len(invocation.args) != 1 or invocation.kwargs:
+            raise ValueError("authorizer requires exactly one positional key")
+        _require_non_empty_string(invocation.args[0], name, "key")
+    elif name == "public":
+        raise ValueError("public must be used as a bare decorator")
     return invocation
 
 
@@ -300,6 +308,19 @@ def get_file_nodes(parsed_tree, id, directory):
                     _require_non_empty_string(path, invocation.name, "path")
                     is_lambda_http = True
                     paths.append((path, invocation.name))
+
+            auth_invocations = [
+                invocation for invocation in decorator_invocations
+                if invocation.name in ("authorizer", "public")
+            ]
+            if len(auth_invocations) > 1:
+                raise ValueError(
+                    "Conflicting or repeated authentication decorators are not allowed"
+                )
+            if len(paths) > 1 and auth_invocations:
+                raise ValueError(
+                    "Authentication on a handler with multiple routes is ambiguous"
+                )
 
             #ast.FunctionDef ends. If the Function had an HTTP Decorator it means it's a lambda function
             if is_lambda_http: 

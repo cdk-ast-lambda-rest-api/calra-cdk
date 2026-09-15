@@ -27,6 +27,8 @@ class LambdaApiConfig:
         environment: Optional[Mapping[str, str]] = None,
         dynamodb_tables: Optional[Mapping[str, dynamodb.ITable]] = None,
         s3_buckets: Optional[Mapping[str, s3.IBucket]] = None,
+        authorizers: Optional[Mapping[str, object]] = None,
+        default_authorizer: Optional[str] = None,
     ) -> None:
         self._default_runtime = runtime
         self._default_timeout = timeout
@@ -49,10 +51,15 @@ class LambdaApiConfig:
 
         self._dynamodb_tables = {}
         self._s3_buckets = {}
+        self._authorizers = {}
         for key, table in (dynamodb_tables or {}).items():
             self.add_dynamodb_table(key, table)
         for key, bucket in (s3_buckets or {}).items():
             self.add_s3_bucket(key, bucket)
+        for key, authorizer in (authorizers or {}).items():
+            self.add_authorizer(key, authorizer)
+        self._default_authorizer = None
+        self.set_default_authorizer(default_authorizer)
 
     def set_default_runtime(self, runtime: Optional[lambda_.Runtime]) -> None:
         self._default_runtime = runtime
@@ -117,6 +124,35 @@ class LambdaApiConfig:
     def add_s3_bucket(self, key: str, bucket: s3.IBucket) -> None:
         self._add_resource(key, bucket, self._s3_buckets, "S3 bucket")
 
+    def add_authorizer(self, key: str, authorizer: object) -> None:
+        if not isinstance(key, str):
+            raise TypeError("Authorizer registry keys must be strings")
+        if not key.strip():
+            raise ValueError("Authorizer registry keys must not be empty or whitespace")
+        interfaces = getattr(authorizer, "__jsii_ifaces__", ()) if authorizer is not None else ()
+        supported = {
+            "aws_cdk.aws_apigateway.IAuthorizer",
+            "aws_cdk.aws_apigatewayv2.IHttpRouteAuthorizer",
+        }
+        if not any(f"{interface.__module__}.{interface.__name__}" in supported
+                   for interface in interfaces):
+            raise TypeError("Authorizer must be a CDK authorizer object")
+        if key in self._authorizers:
+            raise ValueError(f"Authorizer key {key!r} is already registered")
+        self._authorizers[key] = authorizer
+
+    def set_default_authorizer(self, key: Optional[str]) -> None:
+        if key is None:
+            self._default_authorizer = None
+            return
+        if not isinstance(key, str):
+            raise TypeError("Default authorizer key must be a string or None")
+        if not key.strip():
+            raise ValueError("Default authorizer key must not be empty or whitespace")
+        if key not in self._authorizers:
+            raise KeyError(f"Authorizer key {key!r} is not registered")
+        self._default_authorizer = key
+
     @staticmethod
     def _add_resource(key: str, resource, registry: dict, resource_type: str) -> None:
         if not isinstance(key, str):
@@ -148,4 +184,6 @@ class LambdaApiConfig:
             custom_vpcs=dict(self._custom_vpcs),
             dynamodb_tables=dict(self._dynamodb_tables),
             s3_buckets=dict(self._s3_buckets),
+            authorizers=dict(self._authorizers),
+            default_authorizer=self._default_authorizer,
         )

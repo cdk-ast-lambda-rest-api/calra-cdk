@@ -15,8 +15,8 @@ class FakeRestResource:
     def __init__(self):
         self.methods = []
 
-    def add_method(self, method, integration, options=None):
-        self.methods.append((method, options or {}))
+    def add_method(self, method, integration, **options):
+        self.methods.append((method, options))
 
 
 class FakeHttpApi:

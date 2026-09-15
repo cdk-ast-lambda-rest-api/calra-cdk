@@ -1,5 +1,4 @@
 from aws_cdk import App, Stack, aws_apigateway as apigateway
-from aws_cdk import aws_cognito as cognito
 from aws_cdk.assertions import Annotations, Match
 
 from conftest import make_graph, make_method
@@ -26,14 +25,15 @@ def build(builder, stack, monkeypatch, methods):
 def messages(stack, level, pattern):
     annotations = Annotations.from_stack(stack)
     finder = annotations.find_warning if level == "warning" else annotations.find_info
-    return finder(stack.node.path, Match.string_like_regexp(pattern))
+    return finder(f"/{stack.node.path}", Match.string_like_regexp(pattern))
 
 
 def rest_authorizer(stack, construct_id):
-    pool = stack.node.try_find_child("Pool") or cognito.UserPool(stack, "Pool")
-    return apigateway.CognitoUserPoolsAuthorizer(
-        stack, construct_id, cognito_user_pools=[pool]
-    )
+    class DiagnosticAuthorizer:
+        __jsii_ifaces__ = [apigateway.IAuthorizer]
+        authorization_type = apigateway.AuthorizationType.CUSTOM
+
+    return DiagnosticAuthorizer()
 
 
 def test_public_default_emits_exactly_one_stable_cdk_warning(monkeypatch):
@@ -43,7 +43,7 @@ def test_public_default_emits_exactly_one_stable_cdk_warning(monkeypatch):
     found = messages(
         stack,
         "warning",
-        r"(?is)LAD_AUTH_PUBLIC_DEFAULT.*routes without explicit auth.*public",
+        r"LAD_AUTH_PUBLIC_DEFAULT[\s\S]*[Rr]outes without explicit auth[\s\S]*public",
     )
     assert len(found) == 1
 
@@ -63,7 +63,7 @@ def test_protected_default_summary_lists_only_sorted_deviations(monkeypatch):
         make_method("PUT"),
     ]
     build(builder, stack, monkeypatch, methods)
-    found = messages(stack, "info", r"(?s)Default authorizer: users.*Overrides:")
+    found = messages(stack, "info", r"Default authorizer: users[\s\S]*Overrides:")
     assert len(found) == 1
     text = found[0].entry.data
     assert "GET /" in text and "PUBLIC" in text
@@ -84,7 +84,7 @@ def test_public_default_summary_lists_only_explicit_protected_routes(monkeypatch
     ]
     build(builder, stack, monkeypatch, methods)
     assert len(messages(stack, "warning", r"LAD_AUTH_PUBLIC_DEFAULT")) == 1
-    found = messages(stack, "info", r"(?s)Default authorizer: PUBLIC.*Protected routes:")
+    found = messages(stack, "info", r"Default authorizer: PUBLIC[\s\S]*Protected routes:")
     assert len(found) == 1
     text = found[0].entry.data
     assert "POST /" in text and "users" in text

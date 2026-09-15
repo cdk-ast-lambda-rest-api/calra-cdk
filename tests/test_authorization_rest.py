@@ -15,7 +15,7 @@ class RestResource:
         self.defaults = defaults
         self.calls = []
 
-    def add_method(self, method, integration, options=None):
+    def add_method(self, method, integration, **options):
         self.calls.append((method, options))
 
 

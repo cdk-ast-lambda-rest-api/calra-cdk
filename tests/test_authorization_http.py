@@ -1,5 +1,5 @@
 import pytest
-from aws_cdk import App, Stack, Duration, aws_lambda as lambda_
+from aws_cdk import App, Stack, Duration, aws_apigatewayv2, aws_lambda as lambda_
 from aws_cdk import aws_apigatewayv2_authorizers as authorizers
 
 from conftest import make_graph, make_method
@@ -54,7 +54,7 @@ def test_http_public_route_explicitly_uses_none_authorizer(
     builder.build_http_from_graph(
         object(), make_graph(methods=[make_method(decorators=decorators)]), api
     )
-    assert isinstance(api.routes[0]["authorizer"], authorizers.HttpNoneAuthorizer)
+    assert isinstance(api.routes[0]["authorizer"], aws_apigatewayv2.HttpNoneAuthorizer)
 
 
 def test_http_lambda_authorizer_is_supported(monkeypatch):
